@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,13 +18,18 @@ export function LoginForm() {
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The id and password did not match: both fields are what was wrong.
+  const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
+  const errorId = useId();
+  const secret = useRef<HTMLInputElement>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
+    setWrong(false);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -34,7 +39,12 @@ export function LoginForm() {
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         setError(body?.error ?? "로그인하지 못했어요.");
+        setWrong(res.status === 401);
         setPassword("");
+        setBusy(false);
+        // Back in the field to type again: submitted from the keyboard, the
+        // keyboard had gone, and the emptied field had to be found and tapped.
+        secret.current?.focus();
         return;
       }
       const from = params.get("from");
@@ -42,9 +52,10 @@ export function LoginForm() {
       // from a live session.
       router.replace(from && from.startsWith("/") ? from : "/");
       router.refresh();
+      // Still 확인 중 while the console loads: the form goes with this page.
+      // Back to 로그인 meanwhile, it looked refused, and was pressed again.
     } catch {
       setError("서버에 연결하지 못했어요.");
-    } finally {
       setBusy(false);
     }
   }
@@ -71,9 +82,16 @@ export function LoginForm() {
               value={id}
               onChange={(e) => setId(e.target.value)}
               autoComplete="username"
+              // Compared as typed: a phone's capital first letter, or its
+              // correction, made a right id a wrong one.
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               // No autoFocus on touch: it throws the keyboard up over the form
               // before anyone has decided to type.
               required
+              aria-invalid={wrong || undefined}
+              aria-describedby={error ? errorId : undefined}
               className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-body"
             />
           </label>
@@ -81,17 +99,22 @@ export function LoginForm() {
             <span className="mb-1.5 block text-meta text-faint">비밀번호</span>
             {/* With 보기: a phone keyboard makes a typo easy, and this is the one place to see it. */}
             <SecretInput
+              ref={secret}
               value={password}
               onChange={setPassword}
               autoComplete="current-password"
               required
+              aria-invalid={wrong || undefined}
+              aria-describedby={error ? errorId : undefined}
               className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-body"
             />
           </label>
         </div>
 
         {error ? (
-          <Failed className="mt-4">{error}</Failed>
+          <div id={errorId} className="mt-4">
+            <Failed>{error}</Failed>
+          </div>
         ) : null}
 
         <Button

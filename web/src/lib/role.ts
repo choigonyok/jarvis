@@ -29,6 +29,13 @@ export type Role = "owner" | "guest";
 /** Set by the middleware on every request it lets through; overwritten, never trusted from the client. */
 export const ROLE_HEADER = "x-jarvis-role";
 
+/**
+ * What a guest sent away from a page that is not theirs arrives at the
+ * conversation with (/?denied=1, the middleware), so that it says why
+ * (shell/toasts.tsx).
+ */
+export const DENIED_PARAM = "denied";
+
 const list = (v: string | undefined) =>
   (v ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 

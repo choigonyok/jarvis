@@ -74,10 +74,15 @@ function HeaderView({
   const role = useRole();
   const hubs = hubsFor(role);
   const here = hubOf(hubs, pathname);
-  const strip = here && here.screens.length > 1 ? here.screens : null;
+  // A place's screens as words - over one of them. The operator's 편집 is
+  // reached from 사진 and is none of 생활's (lib/hubs.ts hubOf): 나 사진 위치
+  // stood over it with none set, and nothing said where this was.
+  const strip = here && here.screens.length > 1 && here.screens.some((s) => s.href === screenOf(pathname)) ? here.screens : null;
   // A place of one screen says which: "Jarvis" over every one of them told
-  // nobody where they were. The conversation is Jarvis's own.
-  const title = here && !strip && here.screens[0].href !== "/" ? here.screens[0].label : "Jarvis";
+  // nobody where they were. The conversation is Jarvis's own; 편집 says its
+  // own name, as it does for the guest.
+  const title =
+    pathname === "/edit" ? "편집" : here && !strip && here.screens[0].href !== "/" ? here.screens[0].label : "Jarvis";
   const router = useRouter();
   const out = useSignOut();
   const status = connectionCopy[connection];

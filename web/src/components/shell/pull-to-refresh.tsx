@@ -10,9 +10,13 @@ import { cn } from "@/lib/utils";
 const TRIGGER = 72;
 const MAX = 110;
 
-/** The build the server is serving now (app/api/version), or null if it cannot say. */
+/**
+ * The build the server is serving now (app/api/version), or null if it cannot
+ * say - within a few seconds: on one bar of signal it hung for as long as the
+ * browser would wait, and a pull spun on it.
+ */
 const serving = () =>
-  fetch("/api/version", { cache: "no-store" })
+  fetch("/api/version", { cache: "no-store", signal: AbortSignal.timeout(3000) })
     .then((res) => (res.ok ? (res.json() as Promise<{ build?: string }>) : null))
     .then((body) => body?.build || null)
     .catch(() => null);
@@ -66,15 +70,19 @@ function wouldLose(): boolean {
  * three away). Only when a newer build has been deployed since this page came
  * up does it load the page again: that is the one thing a re-read cannot bring.
  * Not while that would throw something away, though: it re-reads, and the new
- * build waits for the next return to the app.
+ * build waits for the next return to the app. The re-reads start with the
+ * pull, beside the question of the build rather than after its answer; a
+ * reload cuts off the ones it overtakes.
  */
 async function refresh() {
-  if ((await newerBuild()) && !wouldLose()) {
+  const started = Date.now();
+  const build = newerBuild();
+  const read = refreshAll();
+  if ((await build) && !wouldLose()) {
     window.location.reload();
     return new Promise<never>(() => {});
   }
-  const started = Date.now();
-  await refreshAll();
+  await read;
   // Long enough to be seen to have happened.
   const rest = 500 - (Date.now() - started);
   if (rest > 0) await new Promise((resolve) => setTimeout(resolve, rest));

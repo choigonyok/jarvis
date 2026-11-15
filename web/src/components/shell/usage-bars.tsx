@@ -5,7 +5,6 @@ import { HeaderPanel } from "@/components/shell/panel";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import {
-  agoLabel,
   ageMinutes,
   capPct,
   freeLabel,
@@ -19,6 +18,7 @@ import {
   useUsage,
 } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
+import { ago } from "@/lib/when";
 
 /** Where a meter starts to warm (lib/use-usage.ts tone): the header shows the bars from here. */
 const WARM = 70;
@@ -60,7 +60,7 @@ export function UsageBars() {
   const label =
     five == null && week == null
       ? "Claude 사용량을 아직 읽지 못했어요"
-      : `Claude 사용량${age != null ? `(${agoLabel(age)} 측정)` : ""}: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
+      : `Claude 사용량${usage?.at ? `(${ago(usage.at)} 측정)` : ""}: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
         (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
         (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "") +
         (mindPct == null ? "" : `, 판단용 API 하루 상한의 ${mindPct}%`);
@@ -92,7 +92,7 @@ export function UsageBars() {
       {open ? (
         <HeaderPanel
           title="사용량"
-          aside={at ? <span className="tnum text-meta text-faint">{at} 기준{age != null ? ` · ${agoLabel(age)}` : ""}</span> : null}
+          aside={at ? <span className="tnum text-meta text-faint">{at} 기준 · {ago(usage?.at)}</span> : null}
         >
           <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3">
             <Group name="Claude 구독">
@@ -112,7 +112,7 @@ export function UsageBars() {
               />
               {stale ? (
                 <p className="text-meta leading-snug text-faint">
-                  {agoLabel(age!)} 값이에요. 그 뒤에 claude.ai나 다른 기기에서 쓴 양은 다음 대화나 작업 때(쉬는 동안엔 한 시간마다)
+                  {ago(usage?.at)} 값이에요. 그 뒤에 claude.ai나 다른 기기에서 쓴 양은 다음 대화나 작업 때(쉬는 동안엔 한 시간마다)
                   반영돼요.
                 </p>
               ) : null}
@@ -227,20 +227,29 @@ function Meter({
   figure: ReactNode;
   value: number | null;
   note?: string;
-  /** An old reading: drawn quieter than a fresh one. */
+  /**
+   * An old reading: drawn quieter than a fresh one - its figure in the
+   * explaining grey and its bar dimmed, the words left as they are (faint
+   * under a veil was past reading; "N분 전 값이에요" says it is old).
+   */
   faint?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <div className={cn("transition-opacity", faint && "opacity-60")}>
+    <div>
       <div className="flex items-baseline justify-between gap-3 text-aside">
         <span className="text-dim">
           {name}
           {detail ? <span className="ms-1.5 text-meta text-faint">{detail}</span> : null}
         </span>
-        <span className="tnum text-ui text-foreground">{figure}</span>
+        <span className={cn("tnum text-ui", faint ? "text-dim" : "text-foreground")}>{figure}</span>
       </div>
-      <Progress aria-hidden value={value ?? 0} className="mt-1.5" indicatorClassName={tone(value)} />
+      <Progress
+        aria-hidden
+        value={value ?? 0}
+        className={cn("mt-1.5 transition-opacity", faint && "opacity-60")}
+        indicatorClassName={tone(value)}
+      />
       {note ? <p className="tnum mt-1 text-meta leading-snug text-faint">{note}</p> : null}
       {children}
     </div>

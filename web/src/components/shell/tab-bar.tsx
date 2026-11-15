@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Ellipsis, LogOut } from "lucide-react";
@@ -69,6 +69,27 @@ function TabBarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
+  // A place's list left standing is a layer, as a sheet is (ui/sheet.tsx): it
+  // has an entry in the history, and going back - the edge swipe - puts it
+  // away instead of leaving the screen. Set while that entry is there.
+  const entry = useRef(false);
+
+  /**
+   * To a screen, from the bar or the list. Over a list's entry the screen
+   * takes its place - going back from it is the screen before, not the list;
+   * going back first and then forward could cross on the way, and the
+   * navigation was lost.
+   */
+  function goTo(href: string) {
+    const instead = entry.current;
+    entry.current = false;
+    if (href === pathname) {
+      if (instead) window.history.back();
+      return;
+    }
+    startNavigation(() => (instead ? router.replace(href) : router.push(href)));
+  }
+
   function go(slot: number) {
     if (slot === moreSlot && !inMore) {
       setMore(true);
@@ -80,7 +101,7 @@ function TabBarView({
     // A place opens where it was left; its own slot again goes round its screens.
     const next = (hub.screens.findIndex((s) => s.href === pathname) + 1) % hub.screens.length;
     const href = slot === at ? hub.screens[next].href : lastIn(hub);
-    if (href !== pathname) startNavigation(() => router.push(href));
+    goTo(href);
   }
 
   // Dragging along the bar, as on iOS: the lens follows the finger and the tab
@@ -108,8 +129,81 @@ function TabBarView({
   // lets go, one gesture. Let go at once, the list stays for a tap.
   const [menu, setMenu] = useState<{ slot: number; at: number; left: number; pinned: boolean } | null>(null);
   const menuBox = useRef<HTMLDivElement>(null);
+  // The whole list, 로그아웃 too: what the keys move in.
+  const listBox = useRef<HTMLDivElement>(null);
   const holding = useRef<number | undefined>(undefined);
   const stopHold = () => window.clearTimeout(holding.current);
+  const pinned = menu?.pinned ?? false;
+
+  /** The list put away; the focus, if it was in it, back on its place's tab. */
+  const putAway = useCallback(() => {
+    const box = listBox.current;
+    const tab = box?.contains(document.activeElement)
+      ? track.current?.querySelector<HTMLElement>(`[data-place="${box.dataset.place}"]`)
+      : null;
+    setMenu(null);
+    tab?.focus({ preventScroll: true });
+  }, []);
+
+  /** Called off - a tap outside it, Esc, a finger slid away: the list goes, and its entry with it. */
+  const callOff = useCallback(() => {
+    putAway();
+    if (!entry.current) return;
+    entry.current = false;
+    window.history.back();
+  }, [putAway]);
+
+  // Left standing, the list is a menu like any other: its entry in the
+  // history, and the focus in it - on the screen showing, or the first - so
+  // the arrow keys, Esc and a screen reader work in it. It stood on screen
+  // with the focus left on the bar, and a swipe on read out a screen-wide
+  // 닫기 first.
+  useEffect(() => {
+    if (!pinned) return;
+    if (!entry.current) {
+      entry.current = true;
+      window.history.pushState({ ...window.history.state, jarvisMenu: true }, "");
+    }
+    const box = listBox.current;
+    (box?.querySelector<HTMLElement>('[aria-current="page"]') ?? box?.querySelector<HTMLElement>('[role="menuitem"]'))?.focus({
+      preventScroll: true,
+    });
+  }, [pinned]);
+
+  // Gone back past the list's entry: the list goes.
+  useEffect(() => {
+    const back = () => {
+      if (!entry.current || window.history.state?.jarvisMenu) return;
+      entry.current = false;
+      putAway();
+    };
+    window.addEventListener("popstate", back);
+    return () => window.removeEventListener("popstate", back);
+  }, [putAway]);
+
+  function onListKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    // Tab leaves it as Esc does, back to its tab: the list stands over the page.
+    if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      callOff();
+      return;
+    }
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+    const now = items.indexOf(document.activeElement as HTMLElement);
+    const to =
+      e.key === "ArrowDown"
+        ? now + 1
+        : e.key === "ArrowUp"
+          ? (now < 0 ? 0 : now) - 1
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? items.length - 1
+              : null;
+    if (to === null || items.length === 0) return;
+    e.preventDefault();
+    items[(to + items.length) % items.length].focus();
+  }
 
   function startHold(slot: number, el: HTMLElement, pointer: number) {
     stopHold();
@@ -135,9 +229,9 @@ function TabBarView({
   }
 
   function openScreen(slot: number, href: string) {
-    setMenu(null);
+    putAway();
     setChosen(slot);
-    if (href !== pathname) startNavigation(() => router.push(href));
+    goTo(href);
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -185,7 +279,7 @@ function TabBarView({
       const at = itemAt(e.clientY, d.slot);
       if (at >= 0) openScreen(d.slot, hubs[d.slot].screens[at].href);
       // Slid over the list and away: called off.
-      else if (d.entered) setMenu(null);
+      else if (d.entered) callOff();
       else setMenu((m) => m && { ...m, at: -1, pinned: true });
       return;
     }
@@ -195,7 +289,7 @@ function TabBarView({
     stopHold();
     drag.current = null;
     setHeld(null);
-    setMenu(null);
+    callOff();
   }
 
   const dragging = held !== null;
@@ -231,11 +325,15 @@ function TabBarView({
         paddingRight: "max(env(safe-area-inset-right), 1rem)",
       }}
     >
+      {/* A finger's way to put the list away, outside it. Not a stop for the
+          keys or a screen reader, which have Esc and going back: as the first
+          thing in the bar, a screen-wide 닫기 was read before the tabs. */}
       {menu?.pinned ? (
         <button
           type="button"
-          aria-label="닫기"
-          onClick={() => setMenu(null)}
+          tabIndex={-1}
+          aria-hidden
+          onClick={callOff}
           className="pointer-events-auto absolute inset-0 outline-none"
         />
       ) : null}
@@ -290,6 +388,7 @@ function TabBarView({
                 href={hub.screens[0].href}
                 prefetch
                 draggable={false}
+                data-place={slot}
                 aria-label={marked ? `${hub.label}, 결재 대기 ${pending}건` : hub.label}
                 title={hub.label}
                 aria-current={here === hub ? "page" : undefined}
@@ -323,6 +422,7 @@ function TabBarView({
                   (moreMarked ? `, 결재 대기 ${pending}건` : "")
                 }
                 title="다른 화면"
+                data-place={moreSlot}
                 onClick={(e) => {
                   if (suppressClick.current) {
                     e.preventDefault();
@@ -390,8 +490,11 @@ function TabBarView({
       </div>
       {menu ? (
         <div
+          ref={listBox}
           role="menu"
           aria-label={`${hubs[menu.slot].label}의 화면`}
+          data-place={menu.slot}
+          onKeyDown={onListKey}
           className="liquid-glass pointer-events-auto origin-bottom animate-in rounded-3xl duration-150 fade-in-0 zoom-in-95 motion-reduce:animate-none"
           // Inline: .liquid-glass sets its own position and next to no paint,
           // and words read over a page need more than the bar's icons do.

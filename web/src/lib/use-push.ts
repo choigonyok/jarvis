@@ -176,7 +176,8 @@ export function usePush() {
     }
   }, []);
 
-  const disable = useCallback(async () => {
+  /** Whether this device was turned off: one that was not is still on, and is said to be where it was pressed. */
+  const disable = useCallback(async (): Promise<boolean> => {
     setBusy(true);
     try {
       const reg = await registration();
@@ -191,6 +192,9 @@ export function usePush() {
       }
       keepOff(true);
       setState("off");
+      return true;
+    } catch {
+      return false;
     } finally {
       setBusy(false);
     }

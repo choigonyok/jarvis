@@ -18,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
 import { HttpError, useResource } from "@/lib/use-resource";
 import { readable } from "@/lib/brief";
-import { dayOf, monthDay } from "@/lib/when";
+import { ago } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /**
@@ -79,17 +79,6 @@ type Settings = { muted: string[]; quietStart: string; quietEnd: string; digestA
 /** A category a sender can use (the part of `kind` before the dot). output-svc owns the list. */
 type Category = { id: string; label: string; hint: string };
 
-const ago = (iso: string) => {
-  const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-  if (m < 1) return "방금";
-  if (m < 60) return `${m}분 전`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  const d = Math.round(h / 24);
-  // Older than a week, the day itself - as every screen names one (lib/when.ts).
-  return d < 7 ? `${d}일 전` : monthDay(dayOf(new Date(iso)));
-};
-
 /** How many the inbox shows a page: output-svc counts them all and sends one page. */
 const INBOX_PAGE = 20;
 
@@ -110,9 +99,12 @@ export function Notifications() {
   const [unheard, setUnheard] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "settings">("list");
-  const [page, setPage] = useState(1);
+  // A page pressed, while its list is on the way.
+  const [turning, setTurning] = useState<number | null>(null);
+  // Marked read here, and not kept by the service.
+  const [unmarked, setUnmarked] = useState(false);
   const list = useRef<HTMLUListElement>(null);
-  // The page the timer and a return to the app read again.
+  // The page the next read asks for: the timer, a return to the app, a page pressed.
   const shownPage = useRef(1);
 
   // The badge stays current while the console is open - read every minute
@@ -128,11 +120,15 @@ export function Notifications() {
       });
       if (!res.ok) throw new HttpError(res.status, SAY.couldNotLoad);
       const body = (await res.json()) as { items: Note[]; unread: number; total?: number };
-      return { notes: body.items, unread: body.unread, total: body.total ?? body.items.length };
+      return { notes: body.items, unread: body.unread, total: body.total ?? body.items.length, page: p };
     },
     { interval: 60_000 },
   );
   const notes = inbox.data?.notes ?? NO_NOTES;
+  // The page whose list is on screen: its number changes with the list, not
+  // before it - "2쪽, 21–40" stood over page 1's notices while page 2 was
+  // read, and stayed there when it could not be (가계부's month, the same).
+  const page = inbox.data?.page ?? 1;
   const unread = inbox.data ? inbox.data.unread : lastBell.unread;
   // Red only for an alert not read yet (a service that failed), as in the
   // list below; anything else unread is the grey of a waiting decision. Red
@@ -147,10 +143,21 @@ export function Notifications() {
 
   const turn = (p: number) => {
     shownPage.current = p;
-    setPage(p);
-    void load();
-    list.current?.scrollTo({ top: 0 });
+    setTurning(p);
+    void load().finally(() => setTurning((t) => (t === p ? null : t)));
   };
+  // Shown while a page other than the one on screen is on its way.
+  const asking = turning !== null && turning !== page ? turning : null;
+  // A page that could not be read leaves the inbox on the one it shows, and
+  // the timer reads that one again rather than turning to the other later.
+  // Not while a page is on its way: its tries again ask for it too.
+  useEffect(() => {
+    if (open && turning === null && inbox.error) shownPage.current = page;
+  }, [open, turning, inbox.error, page]);
+  // A new page from its top.
+  useEffect(() => {
+    list.current?.scrollTo({ top: 0 });
+  }, [page]);
 
   // A card decided on this screen: its "결재 대기" was just marked read.
   useEffect(() => {
@@ -185,6 +192,8 @@ export function Notifications() {
   };
 
   const markRead = async (ids: number[]) => {
+    const before = inbox.data;
+    setUnmarked(false);
     inbox.mutate((cur) =>
       cur && {
         ...cur,
@@ -192,11 +201,17 @@ export function Notifications() {
         unread: ids.length === 0 ? 0 : Math.max(0, cur.unread - ids.filter((id) => notes.find((n) => n.id === id && !n.readAt)).length),
       },
     );
-    await fetch("/api/notify/notifications/read", {
+    const res = await fetch("/api/notify/notifications/read", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids }),
-    }).catch(() => {});
+    }).catch(() => null);
+    if (res?.ok) return;
+    // Not kept: the dots come back now, with a word, and the service is asked
+    // what it holds. They went out and came back a minute later, unsaid.
+    inbox.mutate(() => before);
+    setUnmarked(true);
+    void load();
   };
 
   return (
@@ -204,12 +219,15 @@ export function Notifications() {
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (!o) return;
+        setUnmarked(false);
+        // Closed, the timer reads the newest page, which the bell is about;
+        // opened, the inbox starts there.
+        if (!o) {
+          shownPage.current = 1;
+          return;
+        }
         setView("list");
-        // Opened, the inbox starts at its newest page.
-        shownPage.current = 1;
-        setPage(1);
-        void load();
+        turn(1);
       }}
     >
       <PopoverTrigger
@@ -233,9 +251,18 @@ export function Notifications() {
           title={view === "list" ? "알림" : "알림 설정"}
           aside={
             <>
-              {/* A re-read that failed under a list still shown: the list is
+              {/* A page on its way, said as it comes; 모두 읽음 not kept; a
+                  re-read that failed under a list still shown: the list is
                   the earlier read's, and says so. */}
-              {view === "list" && failed && notes.length > 0 ? (
+              {view !== "list" ? null : asking !== null ? (
+                <span aria-live="polite" className="tnum text-meta text-faint">
+                  {asking}쪽 불러오는 중…
+                </span>
+              ) : unmarked ? (
+                <span role="status" className="text-meta text-reject">
+                  읽음으로 바꾸지 못했어요
+                </span>
+              ) : failed && notes.length > 0 ? (
                 <AsOf at={inbox.readAt} failed onRetry={() => void load()} />
               ) : null}
               {view === "list" && unread ? (
@@ -265,7 +292,11 @@ export function Notifications() {
               long words wrap now (globals.css), and nothing here pans. */}
           {view === "list" ? (
             <>
-            <ul ref={list} className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
+            <ul
+              ref={list}
+              aria-busy={asking !== null || undefined}
+              className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain"
+            >
               {failed && notes.length === 0 ? (
                 <li className="px-3.5 py-4">
                   <Failed quiet onRetry={load}>
@@ -292,19 +323,34 @@ export function Notifications() {
                         // Into the screen and onto the part it is about.
                         openTarget(targetOf(n), (path) => router.push(path));
                       }}
-                      className="flex w-full gap-2.5 px-3.5 py-2.5 text-left outline-none hover:bg-glass focus-visible:bg-glass"
+                      // The ring every control has, inside the row: the list
+                      // clips at its edges. The glass alone looked like a
+                      // pointer resting there.
+                      className="flex w-full gap-2.5 px-3.5 py-2.5 text-left hover:bg-glass focus-ring focus-visible:ring-inset"
                     >
+                      {/* New is the dot, and an alert's is larger: not its red
+                          alone. In the same 6px, so the words keep their line. */}
                       <span
                         aria-hidden
                         className={cn(
-                          "mt-1.5 size-[6px] shrink-0 rounded-full",
-                          n.readAt ? "bg-transparent" : n.level === "alert" ? "bg-reject" : "bg-foreground/70",
+                          "shrink-0 rounded-full",
+                          n.readAt
+                            ? "mt-1.5 size-[6px]"
+                            : n.level === "alert"
+                              ? "mt-[5px] -mx-px size-2 bg-reject"
+                              : "mt-1.5 size-[6px] bg-foreground/70",
                         )}
                       />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline justify-between gap-2">
-                          <span className={cn("truncate text-aside", n.readAt ? "text-dim" : "text-foreground")}>{said.title}</span>
-                          <span className="shrink-0 text-meta text-faint">{ago(n.createdAt)}</span>
+                          <span className={cn("truncate text-aside", n.readAt ? "text-dim" : "text-foreground")}>
+                            {n.readAt ? null : <span className="sr-only">{n.level === "alert" ? "안 읽음, 급함. " : "안 읽음. "}</span>}
+                            {said.title}
+                          </span>
+                          {/* When, as every screen says it (lib/when.ts): past twelve
+                              hours the moment itself, "어제 21:04" - its own "15시간
+                              전" and "2일 전" (36 hours, rounded) took counting back. */}
+                          <span className="tnum shrink-0 text-meta text-faint">{ago(n.createdAt)}</span>
                         </span>
                         {said.body ? <span className="mt-0.5 line-clamp-2 text-aside leading-relaxed text-dim">{said.body}</span> : null}
                       </span>
@@ -395,6 +441,11 @@ function NotifySettings() {
   // A save that did not go, said beside what was pressed: the panel scrolls,
   // and a line at its foot was out of sight of a switch at its top.
   const [note, setNote] = useState<{ where: "muted" | "time"; text: string } | null>(null);
+  // What a press under 이 기기 came to, said under its buttons: the test is
+  // pressed to find out whether alerts arrive at all, and said nothing, sent
+  // or not; a device that did not turn off went on reading as on.
+  const [said, setSaid] = useState<{ text: string; failed?: boolean } | null>(null);
+  const [testing, setTesting] = useState(false);
   const [attention, setAttention] = useState<Attention | null>(null);
 
   useEffect(() => {
@@ -423,6 +474,24 @@ function NotifySettings() {
     setNote({ where, text: SAY.couldNotSave });
   };
 
+  const sendTest = async () => {
+    setTesting(true);
+    setSaid(null);
+    try {
+      const res = await fetch("/api/notify/test", { method: "POST" });
+      setSaid(res.ok ? { text: "보냈어요 · 곧 도착해요" } : { text: "보내지 못했어요.", failed: true });
+    } catch (err) {
+      setSaid({ text: failureText(err, "보내지 못했어요."), failed: true });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const turnOff = async () => {
+    setSaid(null);
+    if (!(await push.disable())) setSaid({ text: "끄지 못했어요.", failed: true });
+  };
+
   const device: Record<string, string> = {
     loading: "확인하는 중…",
     unsupported: "이 브라우저는 푸시 알림을 받을 수 없어요.",
@@ -443,32 +512,41 @@ function NotifySettings() {
             <button
               type="button"
               disabled={push.busy}
-              onClick={() => void push.enable()}
+              onClick={() => {
+                setSaid(null);
+                void push.enable();
+              }}
               className="min-h-11 rounded-lg bg-glass-raised px-3 text-foreground focus-ring disabled:opacity-50 mouse:min-h-9"
             >
-              알림 받기
+              {push.busy ? "켜는 중…" : "알림 받기"}
             </button>
           ) : null}
           {push.state === "on" ? (
             <>
               <button
                 type="button"
-                onClick={() => void fetch("/api/notify/test", { method: "POST" })}
-                className="min-h-11 rounded-lg bg-glass-raised px-3 text-foreground focus-ring mouse:min-h-9"
+                disabled={testing}
+                onClick={() => void sendTest()}
+                className="min-h-11 rounded-lg bg-glass-raised px-3 text-foreground focus-ring disabled:opacity-50 mouse:min-h-9"
               >
-                시험 알림 보내기
+                {testing ? "보내는 중…" : "시험 알림 보내기"}
               </button>
               <button
                 type="button"
                 disabled={push.busy}
-                onClick={() => void push.disable()}
+                onClick={() => void turnOff()}
                 className="min-h-11 rounded-lg px-3 text-faint hover:text-dim focus-ring disabled:opacity-50 mouse:min-h-9"
               >
-                이 기기 끄기
+                {push.busy ? "끄는 중…" : "이 기기 끄기"}
               </button>
             </>
           ) : null}
         </div>
+        {said ? (
+          <p role="status" className={cn("mt-1.5 text-meta", said.failed ? "text-reject" : "text-faint")}>
+            {said.text}
+          </p>
+        ) : null}
       </section>
 
       {set ? (
