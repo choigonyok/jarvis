@@ -8,6 +8,22 @@ import { SecretInput } from "@/components/ui/secret-input";
 import { Failed } from "@/components/shell/failed";
 
 /**
+ * Where to go once in: the screen the session ran out on (?from=), when it is
+ * one of this console's own. A leading "/" alone let "//elsewhere.example" -
+ * or "/\elsewhere.example", which a browser reads the same - through, and a
+ * crafted login link sent the person off-site the moment they signed in.
+ */
+function backTo(from: string | null): string {
+  if (!from) return "/";
+  try {
+    const url = new URL(from, window.location.origin);
+    return url.origin === window.location.origin ? url.pathname + url.search + url.hash : "/";
+  } catch {
+    return "/";
+  }
+}
+
+/**
  * The first thing anyone sees. It stays as quiet as the rest of the console -
  * a single card on the page's own ground - because it is a door, not a product
  * page: there is exactly one person who gets through it.
@@ -47,10 +63,9 @@ export function LoginForm() {
         secret.current?.focus();
         return;
       }
-      const from = params.get("from");
       // replace, not push: the login page should not be a back-button away
       // from a live session.
-      router.replace(from && from.startsWith("/") ? from : "/");
+      router.replace(backTo(params.get("from")));
       router.refresh();
       // Still 확인 중 while the console loads: the form goes with this page.
       // Back to 로그인 meanwhile, it looked refused, and was pressed again.
