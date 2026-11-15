@@ -175,6 +175,8 @@ export type Queued = {
   id: string;
   text: string;
   images?: string[];
+  /** The earlier message it quotes (agent run.Queued Ref): sent again with it when taken back and undone. */
+  ref?: TurnRef;
   at: string;
 };
 

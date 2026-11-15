@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef } from "react";
+import { flushSync } from "react-dom";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet } from "@/components/ui/sheet";
 import type { Role } from "@/lib/role";
+import { cn } from "@/lib/utils";
 
 /**
  * Something Jarvis can be asked in words. A “quoted” phrase in body is shown
@@ -109,6 +111,12 @@ const ASKS: Ask[] = [
     guest: "“이거 기억해 둬”, “앞으로 반말로 해줘”라고 하면 기억에 적어 두고, 적은 내용은 알림으로 알려 줘요.",
   },
   { title: "사진 보여 주고 묻기", body: "사진을 붙여서 물으면 사진을 보고 답해요." },
+  // Quoting was a swipe nobody was told of: a guest who had never replied in
+  // KakaoTalk could not find it.
+  {
+    title: "앞의 말에 이어서 말하기",
+    body: "메시지를 왼쪽으로 밀면(마우스로는 시간 옆 화살표) 그 말을 붙여서 답할 수 있어요.",
+  },
 ];
 
 /**
@@ -140,16 +148,35 @@ export function GuideSheet({
   open,
   onOpenChange,
   role,
+  onPick,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   role: Role;
+  /**
+   * Puts a phrase in the field, not sent, and focuses it - as a first thing
+   * to say does on the empty conversation (chat/transcript.tsx). Shaped as
+   * those are, the phrases here did nothing when pressed.
+   */
+  onPick?: (text: string) => void;
 }) {
   const asks = ASKS.filter((a) => role === "owner" || !a.ownerOnly);
   // Where focus was when it opened - the ⓘ, opened from the keyboard. The
   // sheet has no Radix trigger to hand focus back to (the ⓘ lives in the
   // header, the sheet outside it), so it is handed back here.
   const back = useRef<HTMLElement | null>(null);
+  // The phrase picked, which the focus goes on to instead.
+  const picked = useRef<string | null>(null);
+  const pick = onPick
+    ? (text: string) => {
+        picked.current = text;
+        // Shut at once, not when the tap is over: while open the sheet keeps
+        // the focus to itself, and the field has to take it in this same tap
+        // for a phone to raise the keyboard.
+        flushSync(() => onOpenChange(false));
+        onPick(text);
+      }
+    : undefined;
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <BottomSheetContent
@@ -160,7 +187,12 @@ export function GuideSheet({
         }}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
-          back.current?.focus();
+          const text = picked.current;
+          picked.current = null;
+          if (text === null) back.current?.focus();
+          // The field took the focus as the phrase went in; if the sheet held
+          // on to it after all, the field is given it now.
+          else if (!document.activeElement || document.activeElement === document.body) onPick?.(text);
         }}
         className="gap-4 overflow-y-auto"
       >
@@ -173,7 +205,7 @@ export function GuideSheet({
             <div key={a.title}>
               <dt className="text-body font-medium text-foreground">{a.title}</dt>
               <dd className="mt-0.5 text-ui leading-[1.7] break-keep text-pretty text-dim">
-                <Said text={role === "guest" && a.guest ? a.guest : a.body} />
+                <Said text={role === "guest" && a.guest ? a.guest : a.body} onPick={pick} />
               </dd>
             </div>
           ))}
@@ -183,16 +215,31 @@ export function GuideSheet({
   );
 }
 
-/** A line with its “quoted” phrases set apart: what to say looks like a message you sent. */
-function Said({ text }: { text: string }) {
+/**
+ * A line with its “quoted” phrases set apart: what to say looks like a message
+ * you sent, and - as the first things to say do - a tap puts it in the field.
+ */
+function Said({ text, onPick }: { text: string; onPick?: (text: string) => void }) {
   const parts = text.split(/“([^”]+)”/);
+  const look = "rounded-md bg-glass-raised px-1.5 py-px whitespace-nowrap text-foreground";
   return (
     <>
       {parts.map((part, i) =>
         i % 2 ? (
-          <q key={i} className="rounded-md bg-glass-raised px-1.5 py-px whitespace-nowrap text-foreground [quotes:none]">
-            {part}
-          </q>
+          onPick ? (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onPick(part)}
+              className={cn(look, "tap-y transition-colors hover:bg-foreground/10 focus-ring")}
+            >
+              <q className="[quotes:none]">{part}</q>
+            </button>
+          ) : (
+            <q key={i} className={cn(look, "[quotes:none]")}>
+              {part}
+            </q>
+          )
         ) : part === ", " && i > 0 && i < parts.length - 1 ? (
           // Between two phrases their own shapes part them; a comma would float.
           " "

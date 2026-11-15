@@ -1,5 +1,6 @@
 "use client";
 
+import type { Element as HastElement } from "hast";
 import type { Parent, PhrasingContent, Root, RootContent } from "mdast";
 import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -96,6 +97,16 @@ function split(text: string, named: string[]): PhrasingContent[] | null {
   return out;
 }
 
+/**
+ * Whether an item of a task list (- [x]) is ticked: its box comes first in it,
+ * or first in its first paragraph in a loose list.
+ */
+function ticked(li?: HastElement): boolean {
+  const first = li?.children.find((c): c is HastElement => c.type === "element");
+  const box = first?.tagName === "p" ? first.children.find((c): c is HastElement => c.type === "element") : first;
+  return box?.tagName === "input" && box.properties?.checked === true;
+}
+
 /** The row of a block's photos: an element of its own, drawn by COMPONENTS["upload-row"]. */
 function row(names: string[]): RootContent {
   return { type: "uploadRow", data: { hName: "upload-row", hProperties: { dataNames: names.join(" ") } } } as unknown as RootContent;
@@ -119,14 +130,27 @@ const COMPONENTS = {
   ),
 
   ul: ({ children }) => (
-    <ul className="space-y-1 ps-[1.1em] [&>li]:list-disc">{children}</ul>
+    <ul className="space-y-1 ps-[1.1em] [&>li]:list-disc [&>li[data-done]]:list-['✓_']">{children}</ul>
   ),
   ol: ({ children }) => (
     <ol className="space-y-1 ps-[1.3em] [&>li]:list-decimal">{children}</ol>
   ),
   // The marker is structure, not content: it stays quieter than the
-  // words it introduces.
-  li: ({ children }) => <li className="marker:text-faint">{children}</li>,
+  // words it introduces. A task list's item (- [ ], - [x]) is said, not
+  // ticked here - the checklist card is what ticks - so it is no box: a
+  // done one takes a check where its bullet goes, one to do keeps the bullet.
+  li: ({ children, className, node }) => (
+    <li
+      data-done={className?.includes("task-list-item") && ticked(node) ? "" : undefined}
+      className="marker:text-faint"
+    >
+      {children}
+    </li>
+  ),
+  // The task's box: a disabled checkbox by a bullet looked like one to tick,
+  // and did nothing. What it said is read out instead.
+  input: ({ type, checked }) =>
+    type === "checkbox" ? <span className="sr-only">{checked ? "한 일: " : "할 일: "}</span> : null,
 
   a: ({ href, children }) => (
     <a

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Reply } from "lucide-react";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -33,7 +33,7 @@ import {
   type TurnRef,
 } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
-import type { useThread } from "@/lib/use-thread";
+import type { Sending, useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
@@ -75,6 +75,22 @@ function RefButton({ onClick }: { onClick: () => void }) {
       className="hidden size-6 items-center justify-center rounded-md text-faint opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-ring pointer-fine:flex"
     >
       <Reply aria-hidden className="size-3.5" />
+    </button>
+  );
+}
+
+/**
+ * Quoting without the swipe, for a screen reader: VoiceOver's one-finger
+ * swipe moves from element to element and never reaches SwipeRow, and the
+ * button beside the time is not drawn on a touch screen, so with it on a
+ * message could not be quoted at all. This one is not drawn either - the look
+ * stays the swipe's - and is out of the Tab order, where it would be a stop
+ * nobody sees. Where the button beside the time is drawn it gives way to it.
+ */
+function QuoteForReader({ onClick, className }: { onClick: () => void; className: string }) {
+  return (
+    <button type="button" tabIndex={-1} onClick={onClick} className={cn("sr-only", className)}>
+      이 메시지 참조
     </button>
   );
 }
@@ -123,7 +139,20 @@ function Quote({ quote, at, onJump }: { quote: TurnRef; at: string; onJump: () =
 function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
   const open = fold.open;
   const text = turn.paragraphs?.join("\n\n") ?? "";
-  const long = text.length > 160 || text.includes("\n");
+  // Whether the words run past the three lines they fold to - measured, as
+  // folded, before the screen is drawn. Judged by a line break, two short
+  // paragraphs offered a 더 보기 that showed nothing more.
+  const body = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const folded = el.classList.contains("line-clamp-3");
+    if (!folded) el.classList.add("line-clamp-3");
+    const over = el.scrollHeight > el.clientHeight + 1;
+    if (!folded) el.classList.remove("line-clamp-3");
+    setLong(over);
+  }, [text, open]);
   const job = turn.origin?.job;
   // A photo the words name is shown where they name it (chat/markdown.tsx);
   // below them, only the ones they do not.
@@ -148,10 +177,8 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
         </Link>
       </div>
       <div
-        className={cn(
-          "mt-1 text-body leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1",
-          !open && long && "line-clamp-3",
-        )}
+        ref={body}
+        className={cn("mt-1 text-body leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && "line-clamp-3")}
       >
         <Markdown>{text}</Markdown>
       </div>
@@ -182,11 +209,16 @@ const ROW =
 
 /**
  * Photos sent with a message, above its bubble - or shown by the assistant
- * (show_image), on its side. One photo is shown whole-ish; several become a
+ * (show_image), on its side. One photo is shown large; several become a
  * square grid, the way a messenger stacks an album. A photo deleted after its
  * listing ended shows as an empty tile, not a broken icon. A tap opens it
  * full screen here (ui/lightbox.tsx): a link to the file took a home-screen
  * app out to the browser.
+ *
+ * One photo's height is set before it loads - the turn has only its name, not
+ * its size - and its width follows the photo, cut at the sides only past the
+ * column: grown from nothing as it came in near the view, it pushed the words
+ * being read down by up to 288px, and iOS has no scroll anchoring to hold them.
  */
 function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: string }) {
   const single = names.length === 1;
@@ -214,7 +246,10 @@ function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: strin
               alt={alt}
               loading="lazy"
               onError={(e) => (e.currentTarget.style.visibility = "hidden")}
-              className={cn("block object-cover", single ? "max-h-72 w-auto max-w-full" : "aspect-square w-24 sm:w-28")}
+              className={cn(
+                "block object-cover",
+                single ? "h-60 w-auto max-w-full min-w-24 sm:h-72" : "aspect-square w-24 sm:w-28",
+              )}
             />
           </button>
         ))}
@@ -223,6 +258,73 @@ function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: strin
         <Lightbox items={names.map((name) => ({ src: photoUrl(name), alt }))} start={open} onClose={() => setOpen(null)} />
       ) : null}
     </>
+  );
+}
+
+/**
+ * A message of yours as the thread draws it - the message it quotes, its
+ * photos, its words - over its footer: the turn's time, or, for one still on
+ * its way, that it is.
+ */
+function Mine({
+  text,
+  images,
+  quote,
+  quoteAt,
+  onJump,
+  sending = false,
+  children,
+}: {
+  text?: string;
+  images?: string[];
+  quote?: TurnRef;
+  quoteAt: string;
+  onJump: (id: string) => void;
+  /** Not back from the stream yet: its words quieter until it is. */
+  sending?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Message align="end" className="text-base">
+      <MessageContent className="items-end gap-1.5">
+        {quote && !text ? (
+          <div className="max-w-[80%] sm:max-w-[26rem]">
+            <Quote quote={quote} at={quoteAt} onJump={() => onJump(quote.id)} />
+          </div>
+        ) : null}
+        {images?.length ? <Photos names={images} /> : null}
+        {/* No backdrop blur: behind a bubble is only the flat page, so it
+            showed nothing, and made a phone redraw the bubble's backdrop
+            on every frame it moved. */}
+        {text ? (
+          <Bubble variant="mine" align="end" className="max-w-[80%] sm:max-w-[26rem]">
+            <BubbleContent>
+              {quote ? <Quote quote={quote} at={quoteAt} onJump={() => onJump(quote.id)} /> : null}
+              <p className={cn("selectable break-words whitespace-pre-wrap", sending && "text-dim")}>{text}</p>
+            </BubbleContent>
+          </Bubble>
+        ) : null}
+        <MessageFooter className="gap-1.5 px-0 pr-1 text-base font-normal" data-search-skip>
+          {children}
+        </MessageFooter>
+      </MessageContent>
+    </Message>
+  );
+}
+
+/**
+ * A message of yours on its way (lib/use-thread.ts Sending), drawn the moment
+ * it was sent as its turn will be, with 보내는 중 where the time goes, until
+ * the turn comes back and takes its place. Not yet anything to quote.
+ */
+function SendingRow({ said, quoteAt, onJump }: { said: Sending; quoteAt: string; onJump: (id: string) => void }) {
+  return (
+    <MessageScrollerItem>
+      <Mine text={said.text} images={said.images} quote={said.ref} quoteAt={quoteAt} onJump={onJump} sending>
+        <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
+        <span className="text-meta text-faint">보내는 중</span>
+      </Mine>
+    </MessageScrollerItem>
   );
 }
 
@@ -307,6 +409,8 @@ const TurnRow = memo(function TurnRow({
     <MarkButtons
       feedback={turn.feedback}
       busy={marks.busy}
+      asking={marks.asking}
+      form={marks.form}
       onGood={marks.good}
       onWrong={marks.wrong}
       onClear={marks.clear}
@@ -372,7 +476,15 @@ const TurnRow = memo(function TurnRow({
                 ) : null}
                 {answer ? <WrongNote feedback={turn.feedback} /> : null}
                 {answer && marks.asking ? (
-                  <WrongForm busy={marks.busy} error={marks.error} onCancel={marks.cancel} onSave={marks.saveWrong} />
+                  <WrongForm
+                    id={marks.form}
+                    box={marks.box}
+                    focus={marks.focus}
+                    busy={marks.busy}
+                    error={marks.error}
+                    onCancel={marks.cancel}
+                    onSave={marks.saveWrong}
+                  />
                 ) : null}
                 {/* The rail holds the time on a wide screen; a phone
                     has no rail, so it sits under the message - with the
@@ -419,6 +531,8 @@ const TurnRow = memo(function TurnRow({
                 ) : null}
               </MessageContent>
             </Message>
+            {/* The rail's button is drawn only under a mouse on a wide screen. */}
+            {typing ? null : <QuoteForReader onClick={quote} className="mouse:hidden" />}
           </SwipeRow>
         </MessageScrollerItem>
       </>
@@ -429,31 +543,11 @@ const TurnRow = memo(function TurnRow({
       {divider}
       <MessageScrollerItem messageId={turn.id} data-turn-id={turn.id} className="group/turn">
         <SwipeRow onRef={quote}>
-          <Message align="end" className="text-base">
-            <MessageContent className="items-end gap-1.5">
-              {turn.ref && !turn.text ? (
-                <div className="max-w-[80%] sm:max-w-[26rem]">
-                  <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} />
-                </div>
-              ) : null}
-              {turn.images?.length ? <Photos names={turn.images} /> : null}
-              {/* No backdrop blur: behind a bubble is only the flat page, so it
-                  showed nothing, and made a phone redraw the bubble's backdrop
-                  on every frame it moved. */}
-              {turn.text ? (
-                <Bubble variant="mine" align="end" className="max-w-[80%] sm:max-w-[26rem]">
-                  <BubbleContent>
-                    {turn.ref ? <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} /> : null}
-                    <p className="selectable break-words whitespace-pre-wrap">{turn.text}</p>
-                  </BubbleContent>
-                </Bubble>
-              ) : null}
-              <MessageFooter className="gap-1.5 px-0 pr-1 text-base font-normal" data-search-skip>
-                <RefButton onClick={quote} />
-                <span className="tnum text-meta text-faint">{time}</span>
-              </MessageFooter>
-            </MessageContent>
-          </Message>
+          <Mine text={turn.text} images={turn.images} quote={turn.ref} quoteAt={quoteAt} onJump={onJump}>
+            <RefButton onClick={quote} />
+            <span className="tnum text-meta text-faint">{time}</span>
+          </Mine>
+          <QuoteForReader onClick={quote} className="pointer-fine:hidden" />
         </SwipeRow>
       </MessageScrollerItem>
     </>
@@ -581,6 +675,7 @@ export const Transcript = memo(function Transcript({
   draft,
   steps,
   onDraftShown,
+  sending,
   error,
   readFailed,
   hydrated,
@@ -621,6 +716,8 @@ export const Transcript = memo(function Transcript({
   /** What the turn under way has done since the last thing said. */
   steps: Step[];
   onDraftShown: (id: string, turn?: string) => void;
+  /** Your messages on their way, drawn at the end until each comes back as its turn. */
+  sending: Sending[];
   error: string | null;
   /** The error is the thread not read again: what is shown may be from before. */
   readFailed: boolean;
@@ -656,7 +753,9 @@ export const Transcript = memo(function Transcript({
   // over the thread's end (--footer-space): the newest row stops above them.
   return (
     <MessageScrollerContent className="gap-7 pb-[calc(var(--footer-space)+1.25rem)] sm:pb-[calc(var(--footer-space)+1.5rem)]">
-      {hydrated && turns.length === 0 ? (
+      {/* The first message on its way is the conversation begun: what to
+          say first gives way to it (not a read that failed, which stays). */}
+      {hydrated && turns.length === 0 && (error || sending.length === 0) ? (
         <MessageScrollerItem className={ROW}>
           <Rail />
           {error ? (
@@ -754,6 +853,15 @@ export const Transcript = memo(function Transcript({
               onFold={onFold}
             />
           ) : null,
+
+          ...sending.map((said) => (
+            <SendingRow
+              key={said.key}
+              said={said}
+              quoteAt={said.ref ? (times.get(said.ref.id) ?? refTime(said.ref.at)) : ""}
+              onJump={onJump}
+            />
+          )),
         ]}
 
         {/* While the answer grows the steps have nothing to say. */}

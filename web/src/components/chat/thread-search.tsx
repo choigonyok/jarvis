@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Toggle } from "@/components/ui/toggle";
+import { cn } from "@/lib/utils";
 
 /** Text that is chrome, not something said: times, buttons, the quote copies. */
 const SKIP = "button, svg, [data-search-skip]";
@@ -82,6 +83,18 @@ function rangeOf(hit: Hit): Range | null {
   r.setStart(hit.node, hit.start);
   r.setEnd(hit.node, hit.end);
   return r;
+}
+
+/**
+ * The 더 보기 of the folded words a hit is in - a job's news, a notice, cut
+ * to a few lines - which comes after them; null when they are not folded.
+ */
+function unfolder(node: Node): HTMLElement | null {
+  const folded = node.parentElement?.closest<HTMLElement>('[class*="line-clamp-"]');
+  for (let el = folded?.nextElementSibling; el; el = el.nextElementSibling) {
+    if (el instanceof HTMLButtonElement && el.getAttribute("aria-expanded") === "false") return el;
+  }
+  return null;
 }
 
 /**
@@ -178,12 +191,25 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
     const same = shown.current?.node === hit.node && shown.current.start === hit.start;
     shown.current = hit;
     if (same && !first.current) return;
-    const box = current.getBoundingClientRect();
-    const frame = el.getBoundingClientRect();
-    if (box.height === 0) return;
-    const smooth = !first.current && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    first.current = false;
-    el.scrollTo({ top: el.scrollTop + box.top - frame.top - el.clientHeight / 2, behavior: smooth ? "smooth" : "auto" });
+    const center = () => {
+      const box = current.getBoundingClientRect();
+      const frame = el.getBoundingClientRect();
+      if (box.height === 0) return;
+      const smooth = !first.current && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      first.current = false;
+      el.scrollTo({ top: el.scrollTop + box.top - frame.top - el.clientHeight / 2, behavior: smooth ? "smooth" : "auto" });
+    };
+    // A hit under a card's fold was counted and could not be seen - 2/5 on
+    // a folded card with nothing marked. The card is opened first, and the
+    // hit brought to the middle once it has.
+    const unfold = unfolder(hit.node);
+    if (!unfold) {
+      center();
+      return;
+    }
+    unfold.click();
+    const frame = requestAnimationFrame(center);
+    return () => cancelAnimationFrame(frame);
   }, [live, at, root]);
 
   useEffect(
@@ -258,7 +284,12 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
         first.current = true;
         setOpen(true);
       },
-      close: () => {
+      /**
+       * refocus: the search button (SearchToggle) takes the focus - closed
+       * from its own row, the focus fell with the row to the top of the page.
+       */
+      close: (refocus = false) => {
+        if (refocus) document.querySelector<HTMLElement>("[data-search-toggle]")?.focus();
         setOpen(false);
         asked.current = "";
         shown.current = null;
@@ -285,6 +316,7 @@ export type ThreadSearch = ReturnType<typeof useThreadSearch>;
 export function SearchToggle({ search }: { search: ThreadSearch }) {
   return (
     <Toggle
+      data-search-toggle=""
       pressed={search.open}
       onPressedChange={(on) => (on ? search.show() : search.close())}
       aria-label={search.open ? "검색 닫기" : "대화 검색"}
@@ -318,19 +350,36 @@ function SearchRow({ search }: { search: ThreadSearch }) {
   }, [text, setQuery]);
 
   const q = search.query.trim();
+  // The pages above could not be read: said where the count is, in red - with
+  // 불러온 대화엔 없음 left standing, a 더 찾기 that failed read as one that
+  // found nothing.
+  const unread = Boolean(q) && !search.seeking && search.total === 0 && search.further && search.aboveFailed;
   // "없음" only of the whole conversation; of what is loaded, it says so.
   const count = !q
     ? ""
     : search.seeking
       ? "찾는 중…"
-      : search.total === 0
-        ? search.further
-          ? "불러온 대화엔 없음"
-          : "없음"
-        : `${search.at + 1}/${search.total}${search.further ? "+" : ""}`;
+      : unread
+        ? "더 읽지 못했어요"
+        : search.total === 0
+          ? search.further
+            ? "불러온 대화엔 없음"
+            : "없음"
+          : `${search.at + 1}/${search.total}${search.further ? "+" : ""}`;
   const offerMore = Boolean(q) && !search.seeking && search.further && (search.total === 0 || search.at >= search.total - 1);
+  const { close } = search;
   return (
-    <div className="inset-x-safe shrink-0 border-t border-edge-soft" role="search">
+    // Escape closes it wherever the focus is in the row: after an arrow was
+    // clicked it was on the arrow, and only the field heard Escape.
+    <div
+      className="inset-x-safe shrink-0 border-t border-edge-soft"
+      role="search"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.nativeEvent.isComposing) return;
+        e.preventDefault();
+        close(true);
+      }}
+    >
       <div className="mx-auto flex h-14 w-full max-w-page items-center gap-1 px-4 sm:px-8">
         <InputGroup
           surface="well"
@@ -348,7 +397,6 @@ function SearchRow({ search }: { search: ThreadSearch }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
-              if (e.key === "Escape") search.close();
               if (e.key === "Enter") {
                 e.preventDefault();
                 // Enter searches at once what is typed; once it has, it walks.
@@ -362,7 +410,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
             className="pl-1.5 mouse:text-body [&::-webkit-search-cancel-button]:hidden"
           />
           <InputGroupAddon align="inline-end" className="pr-3.5">
-            <span className="tnum text-aside font-normal text-faint" aria-live="polite">
+            <span className={cn("tnum text-aside font-normal", unread ? "text-reject" : "text-faint")} aria-live="polite">
               {count}
             </span>
           </InputGroupAddon>
@@ -396,7 +444,10 @@ function SearchRow({ search }: { search: ThreadSearch }) {
         </button>
         <button
           type="button"
-          onClick={search.close}
+          // The focus back on the search button from a key (a click of
+          // detail 0) or a mouse - not after a tap, where it rang the button
+          // for nothing.
+          onClick={(e) => close(e.detail === 0 || window.matchMedia("(pointer: fine)").matches)}
           aria-label="검색 닫기"
           className="-mr-2 flex size-11 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring mouse:size-10"
         >

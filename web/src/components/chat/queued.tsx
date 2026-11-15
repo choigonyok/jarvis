@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Accordion } from "radix-ui";
-import type { Queued } from "@/lib/thread";
+import type { Queued, TurnRef } from "@/lib/thread";
+import type { Sending } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
 /** How long "보내지 않았어요 · 되돌리기" stays before it goes. */
@@ -31,15 +32,21 @@ const TEXT = "pl-1 group-data-[lead=text]/composer:pl-0";
  */
 export function QueuedMessages({
   queue,
+  sending = [],
   onSteer,
   onDrop,
   onRestore,
 }: {
   queue: Queued[];
+  /**
+   * Sent while Jarvis was at work and not in the queue yet: each drawn as the
+   * line it will be, 보내는 중 where its controls will go.
+   */
+  sending?: Sending[];
   onSteer: (id: string) => void | Promise<void>;
   onDrop: (id: string) => void | Promise<void>;
-  /** Sends a dropped message again - the undo of ✕. */
-  onRestore?: (text: string, images?: string[]) => void;
+  /** Sends a dropped message again - the undo of ✕. Resolves false when it did not go. */
+  onRestore?: (text: string, images?: string[], ref?: TurnRef) => Promise<boolean> | void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
@@ -60,7 +67,7 @@ export function QueuedMessages({
     ...queue.map((q) => ({ q, gone: false })),
     ...dropped.filter((d) => !queue.some((q) => q.id === d.id)).map((q) => ({ q, gone: true })),
   ].sort((a, b) => a.q.at.localeCompare(b.q.at));
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && sending.length === 0) return null;
 
   return (
     <Accordion.Root
@@ -71,7 +78,7 @@ export function QueuedMessages({
       asChild
     >
     <ol
-      aria-label={`보내기를 기다리는 메시지 ${queue.length}개`}
+      aria-label={`보내기를 기다리는 메시지 ${queue.length + sending.length}개`}
       className="scrollbar-hairline mb-1 max-h-[11.5rem] overflow-y-auto overscroll-contain border-b border-edge-soft pb-1"
     >
       {rows.map(({ q, gone }) => {
@@ -87,7 +94,12 @@ export function QueuedMessages({
                   type="button"
                   onClick={() => {
                     setDropped((cur) => cur.filter((d) => d.id !== q.id));
-                    onRestore(q.text, q.images);
+                    void Promise.resolve(onRestore(q.text, q.images, q.ref)).then((ok) => {
+                      // Not sent again: the line comes back, with its time to
+                      // undo again - gone, the message was nowhere, not
+                      // waiting and not in the field.
+                      if (ok === false) setDropped((cur) => [...cur, { ...q, droppedAt: Date.now() }]);
+                    });
                   }}
                   className="tap col-span-2 col-start-3 flex h-11 items-center justify-self-end rounded-full px-3 text-aside text-ink hover:text-foreground focus-ring mouse:h-10"
                 >
@@ -158,6 +170,17 @@ export function QueuedMessages({
           </Accordion.Item>
         );
       })}
+      {sending.map((s) => (
+        <li key={s.key} className={cn(ROW, "min-h-11 items-center mouse:min-h-10")}>
+          <span aria-hidden className="anim-breathe size-[5px] justify-self-center rounded-full bg-dim" />
+          <span className={cn(TEXT, "truncate text-ui text-dim")}>
+            {s.text || (s.images.length ? `사진 ${s.images.length}장` : "")}
+          </span>
+          <span className="col-span-2 col-start-3 justify-self-end px-3 text-aside whitespace-nowrap text-faint">
+            보내는 중
+          </span>
+        </li>
+      ))}
     </ol>
     </Accordion.Root>
   );

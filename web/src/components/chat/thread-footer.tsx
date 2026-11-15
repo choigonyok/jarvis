@@ -3,6 +3,7 @@
 import { useLayoutEffect, type ReactNode, type RefObject } from "react";
 import { ArrowDown } from "lucide-react";
 import type { ChatMode } from "@/components/chat/mode-toggle";
+import type { Missed } from "@/components/chat/thread-scroll";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ export function useFooterSpace(
 export function ThreadFooter({
   footerRef,
   seeking,
+  missed,
   away,
   unseen,
   onBottom,
@@ -53,8 +55,10 @@ export function ThreadFooter({
   children,
 }: {
   footerRef: RefObject<HTMLElement | null>;
-  /** Pages above are being read for a card a push asked for. */
-  seeking: boolean;
+  /** Pages above are being read for a card a push asked for, or a message a quote quotes. */
+  seeking: "card" | "turn" | null;
+  /** A quote's message that could not be found, or read up to. */
+  missed: Missed | null;
   /** The newest turn is out of sight. */
   away: boolean;
   /** Replies of Jarvis's that came while away. */
@@ -74,7 +78,25 @@ export function ThreadFooter({
           over it, there only while the newest turn is out of sight. It
           says how many replies came meanwhile, so a reply that landed while
           you were reading back is not missed. */}
-      {seeking ? (
+      {missed ? (
+        // Where the looking was said, what it came to: the tap that asked
+        // for it is answered, not left with nothing.
+        <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
+          <div className="inset-x-safe">
+            <div className="mx-auto flex w-full max-w-page justify-center px-4 sm:px-8">
+              <p
+                role="status"
+                className={cn(
+                  "anim-settle flex min-h-11 items-center rounded-full bg-popover px-4 py-2 text-ui shadow-lg ring-1 ring-edge mouse:min-h-10",
+                  missed.failed ? "text-reject" : "text-dim",
+                )}
+              >
+                {missed.text}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : seeking ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
           <div className="inset-x-safe">
             <div className="mx-auto flex w-full max-w-page justify-center px-4 sm:px-8">
@@ -83,7 +105,7 @@ export function ThreadFooter({
                 className="anim-settle flex h-11 items-center gap-2 rounded-full bg-popover px-4 text-ui text-dim shadow-lg ring-1 ring-edge mouse:h-10"
               >
                 <Spinner className="size-3.5" />
-                카드를 찾는 중…
+                {seeking === "card" ? "카드를 찾는 중…" : "메시지를 찾는 중…"}
               </p>
             </div>
           </div>

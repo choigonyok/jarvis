@@ -16,6 +16,7 @@ import {
   type Queued,
   type Step,
   type Turn,
+  type TurnRef,
 } from "@/lib/thread";
 import { DECIDE_ECHO_MS, decideProposal } from "@/lib/decide";
 import { diag } from "@/lib/diag";
@@ -106,6 +107,23 @@ const PAGE = 60;
 
 /** How long a sent message may take to come back over the stream before the thread is re-read. */
 const SEND_ECHO_MS = 4000;
+
+/**
+ * A message on its way: drawn the moment it is sent - at the end of the
+ * thread, or among the waiting messages when Jarvis was at work (queued) -
+ * until the stream brings it back as a turn or in the queue. The field was
+ * emptied at once and nothing else moved until then: seconds, on a weak
+ * signal, of a message that seemed to have gone nowhere.
+ */
+export type Sending = { key: string; text: string; images: string[]; ref?: TurnRef; queued: boolean };
+
+/**
+ * How long a message that went out is drawn as on its way without coming
+ * back: by then the thread has been read again (SEND_ECHO_MS), and its turn
+ * shows whenever it comes. Known by its words, one the stream gave back
+ * changed would otherwise stay on its way for good.
+ */
+const SENDING_MAX_MS = 20_000;
 
 export function useThread() {
   const [turns, setTurnsState] = useState<Turn[]>(() => cached?.turns ?? []);
@@ -198,6 +216,38 @@ export function useThread() {
     setHasMore(more);
   }, []);
 
+  // What was sent and has not come back yet, oldest first (Sending).
+  const [sending, setSending] = useState<Sending[]>([]);
+  const sendCount = useRef(0);
+  // What came back - a turn of yours new to this page, or a message new to
+  // the queue - takes its own off the way: the one with the same words and
+  // photos, the oldest first. Never drawn twice, once as on its way and once
+  // as itself.
+  const cameBack = useCallback((said: { text?: string; images?: string[] }[]) => {
+    if (said.length === 0) return;
+    setSending((cur) => {
+      let left = cur;
+      for (const s of said) {
+        const text = (s.text ?? "").trim();
+        const images = (s.images ?? []).join(" ");
+        const at = left.findIndex((p) => p.text === text && p.images.join(" ") === images);
+        if (at !== -1) left = left.filter((_, i) => i !== at);
+      }
+      return left;
+    });
+  }, []);
+  // The waiting messages last seen: only one new to the queue can be one
+  // just sent - an older one with the same words ("응") is not it.
+  const queueSeen = useRef<ReadonlySet<string>>(new Set(cachedQueue.map((q) => q.id)));
+  const queueCame = useCallback(
+    (next: Queued[]) => {
+      const seen = queueSeen.current;
+      queueSeen.current = new Set(next.map((q) => q.id));
+      cameBack(next.filter((q) => !seen.has(q.id)));
+    },
+    [cameBack],
+  );
+
   // The newest page - or, on a reconnect, as many turns as are on screen,
   // so what the reader scrolled up to does not vanish under them.
   const hydrate = useCallback(async () => {
@@ -214,12 +264,15 @@ export function useThread() {
         checklists?: Record<string, Checklist>;
         steps?: Step[];
       };
+      const known = new Set((cached?.turns ?? []).map((t) => t.id));
       setTurns(data.turns ?? []);
+      cameBack((data.turns ?? []).filter((t) => t.role === "user" && !known.has(t.id)));
       setMore(Boolean(data.hasMore));
       setProposals(data.proposals ?? []);
       setThinking(Boolean(data.thinking));
       setSteps(data.thinking ? (data.steps ?? []) : []);
       setQueue(data.queue ?? []);
+      queueCame(data.queue ?? []);
       putLists(data.checklists);
       // Read: a failure said before this (a first load that did not come) is
       // over, not left at the bottom of the thread for good.
@@ -229,7 +282,7 @@ export function useThread() {
     } finally {
       setHydrated(true);
     }
-  }, [setTurns, setMore, setProposals, setQueue, putLists]);
+  }, [setTurns, setMore, setProposals, setQueue, putLists, cameBack, queueCame]);
 
   // The page above the oldest turn on screen, put in front of it. Resolves
   // once the turns are in (the caller keeps the view where it was).
@@ -276,6 +329,7 @@ export function useThread() {
     }
     switch (event.type) {
       case "turn":
+        if (event.turn.role === "user" && !cached?.turns.some((t) => t.id === event.turn.id)) cameBack([event.turn]);
         setTurns((prev) => upsert(prev, event.turn, (id) => openedTurns.has(id)));
         if (event.replaces) {
           const { replaces, turn } = event;
@@ -316,15 +370,21 @@ export function useThread() {
         break;
       case "queue":
         setQueue(event.queue ?? []);
+        queueCame(event.queue ?? []);
         break;
       case "error":
         setFailure({ text: event.message });
         setThinking(false);
         setDraft(null);
         setSteps([]);
+        // Most likely the message just sent, turned away on the agent's side
+        // (a quote or a photo it could not find): not on its way any more,
+        // and why is said here. Were it about something else, the message
+        // still shows as itself when it comes.
+        setSending((cur) => (cur.length ? cur.slice(1) : cur));
         break;
     }
-  }, [setTurns, setProposals, setQueue, setChecklists, fetchLists]);
+  }, [setTurns, setProposals, setQueue, setChecklists, fetchLists, cameBack, queueCame]);
 
   // A page of turns came with cards whose lists did not come along (mind did
   // not answer the agent in time): asked for once more.
@@ -364,22 +424,32 @@ export function useThread() {
     requestResume();
   }, [hydrate]);
 
-  /** Resolves true once the agent took the message - to answer now, or queued behind the running turn. */
-  const send = useCallback(async (text: string, images?: string[], refId?: string) => {
+  /**
+   * Resolves true once the agent took the message - to answer now, or queued
+   * behind the running turn. It is drawn as on its way from the moment it is
+   * sent (sending); one that did not go is taken off again, and the field
+   * has it back.
+   */
+  const send = useCallback(async (text: string, images: string[] = [], ref?: TurnRef) => {
     setFailure(null);
+    sendCount.current += 1;
+    const key = `sending-${sendCount.current}`;
+    setSending((cur) => [...cur, { key, text: text.trim(), images, ref, queued: thinking }]);
+    const gone = () => setSending((cur) => cur.filter((s) => s.key !== key));
     try {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           text,
-          ...(images?.length ? { images } : {}),
-          ...(refId ? { ref: { id: refId } } : {}),
+          ...(images.length ? { images } : {}),
+          ...(ref ? { ref: { id: ref.id } } : {}),
         }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         setFailure({ text: body?.error ?? "메시지를 보내지 못했어요." });
+        gone();
         return false;
       }
       // What was sent comes back over the stream within a moment - as a turn,
@@ -393,12 +463,14 @@ export function useThread() {
           resync();
         }
       }, SEND_ECHO_MS);
+      window.setTimeout(gone, SENDING_MAX_MS);
       return true;
     } catch {
       setFailure({ text: "에이전트에 연결하지 못했어요." });
+      gone();
       return false;
     }
-  }, [resync]);
+  }, [resync, thinking]);
 
   /**
    * Acts on a waiting message: "steer" hands it to the running turn, "drop"
@@ -627,6 +699,7 @@ export function useThread() {
     loadOlder,
     resync,
     send,
+    sending,
     steer,
     drop,
     stop,

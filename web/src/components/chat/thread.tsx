@@ -13,6 +13,7 @@ import { ScrollerMoves, useThreadScroll } from "@/components/chat/thread-scroll"
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
 import { Transcript } from "@/components/chat/transcript";
 import { VoiceStage } from "@/components/chat/voice-stage";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { useRole } from "@/components/shell/role";
@@ -90,12 +91,19 @@ export function Thread() {
     loadOlder,
     resync,
     send,
+    sending,
     steer,
     drop,
     stop,
     mark,
     decide,
   } = useThread();
+  // A message on its way shows where it is going: at the end of the thread,
+  // or - sent while Jarvis was at work - among the waiting ones.
+  const [sendingHere, sendingQueued] = useMemo(
+    () => [sending.filter((s) => !s.queued), sending.filter((s) => s.queued)],
+    [sending],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   // The screen's root, which carries --footer-space, and the footer it is
   // measured from.
@@ -270,7 +278,7 @@ export function Thread() {
   const sendFromComposer = useCallback(
     async (text: string, images: string[]) => {
       toNewest();
-      const ok = await send(text, images, quoting?.id);
+      const ok = await send(text, images, quoting ?? undefined);
       if (ok) {
         setQuoting(null);
         // Gone with the message even if the screen was left before it went.
@@ -293,18 +301,19 @@ export function Thread() {
     () => (
       <QueuedMessages
         queue={queue}
+        sending={sendingQueued}
         onSteer={(id) => {
           toNewest();
           return steer(id);
         }}
         onDrop={drop}
-        onRestore={(text, images) => {
+        onRestore={(text, images, ref) => {
           toNewest();
-          void send(text, images);
+          return send(text, images, ref);
         }}
       />
     ),
-    [queue, toNewest, steer, drop, send],
+    [queue, sendingQueued, toNewest, steer, drop, send],
   );
 
   // The transcript is the same one either way - the stage is a different
@@ -344,7 +353,7 @@ export function Thread() {
         <StandingBar pending={waiting} onGo={scroll.goToCard} muted={cardsVisible} />
         <RunningJobs jobs={running} onOpen={openJob} />
       </PageTop>
-      <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
+      <GuideSheet open={guide} onOpenChange={setGuide} role={role} onPick={startWith} />
       {/* Outside the header, as the guide's: a tap on its backdrop would
           otherwise reach the header's own tap. */}
       <JobSheet
@@ -377,13 +386,16 @@ export function Thread() {
                 <div className="mx-auto w-full max-w-page px-4 pt-[calc(var(--top-space)+1.75rem)] sm:px-8 sm:pt-[calc(var(--top-space)+2.5rem)]">
                   {turns.length > 0 && (hasMore || loadingOlder) ? (
                     olderFailed && !loadingOlder ? (
-                      <button
-                        type="button"
-                        onClick={() => scrollRef.current && scroll.askOlder(scrollRef.current, true)}
-                        className="tap mx-auto mb-6 block text-center text-meta text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
+                      // Said as a failure, where the thread's words start: in
+                      // the hint's faint words it read as the hint, and the
+                      // thread as one that ended here.
+                      <Failed
+                        quiet
+                        onRetry={() => scrollRef.current && scroll.askOlder(scrollRef.current, true)}
+                        className="mb-6 max-w-[36rem] sm:ms-14"
                       >
-                        이전 대화를 불러오지 못했어요. 눌러서 다시
-                      </button>
+                        이전 대화를 불러오지 못했어요.
+                      </Failed>
                     ) : (
                       <p className="mb-6 text-center text-meta text-faint" aria-live="polite">
                         {loadingOlder ? "이전 대화를 불러오는 중…" : "위로 올리면 이전 대화가 이어져요"}
@@ -400,6 +412,7 @@ export function Thread() {
                     draft={draft}
                     steps={steps}
                     onDraftShown={draftShown}
+                    sending={sendingHere}
                     error={error}
                     readFailed={readFailed}
                     hydrated={hydrated}
@@ -427,6 +440,7 @@ export function Thread() {
       <ThreadFooter
         footerRef={footerRef}
         seeking={scroll.seeking}
+        missed={scroll.missed}
         away={scroll.away}
         unseen={scroll.unseen}
         onBottom={scroll.toBottom}

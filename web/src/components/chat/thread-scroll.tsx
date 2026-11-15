@@ -32,6 +32,22 @@ let readingSpot: { row: string; offset: number; newest: string | null } | null =
 const HOLD_MS = 800;
 const HOLD_MAX_MS = 3000;
 
+/**
+ * How many pages above a tapped quote reads for the message it quotes before
+ * it stops and says so - about ten days of an ordinary thread. A tap again
+ * goes on from there.
+ */
+const QUOTE_PAGES = 10;
+
+/** How long what a quote could not find stays said over the composer. */
+const MISSED_MS = 5000;
+
+/** What a tap asked to be taken to: a card (a push, 결재하기) or the message a quote quotes. */
+type Wanted = { kind: "card" | "turn"; id: string; pages: number };
+
+/** What the screen says over the composer of a quote it could not follow. */
+export type Missed = { text: string; failed: boolean };
+
 /** The scroller's moves: to the end, to a row. */
 export type Scroller = ReturnType<typeof useMessageScroller>;
 
@@ -57,7 +73,8 @@ export function ScrollerMoves({ toRef }: { toRef: RefObject<Scroller | null> }) 
  * held at the bottom while a phone's keyboard comes up, a page of older turns
  * put in front without a jump, the reading spot kept across tabs, a card a push
  * landed on held in the middle, the way back down and what came meanwhile, and
- * the pages above read until a card asked for is among them.
+ * the pages above read until a card asked for, or a message a quote quotes, is
+ * among them.
  *
  * The screen spreads `viewport` on the scroller's viewport and `content` on the
  * box inside it, and hands `scroller` to ScrollerMoves inside the provider.
@@ -253,71 +270,130 @@ export function useThreadScroll({
   // thread - and marks it for a moment. From ?proposal= when the tap opened
   // this screen, or from the service worker when it was already open. The
   // card may arrive after the tap (the thread is still loading): it is
-  // looked for again as turns and cards come in.
-  const wanted = useRef<string | null>(null);
-  // Pages above being read for the card: said over the composer meanwhile - the view
+  // looked for again as turns and cards come in. A quote tapped in a bubble
+  // goes back to the message it quotes the same way: one above what is
+  // loaded was a tap that did nothing at all.
+  const wanted = useRef<Wanted | null>(null);
+  // Pages above being read for it: said over the composer meanwhile - the view
   // sat still at the bottom with nothing to show for it.
-  const [seeking, setSeeking] = useState(false);
-  const focusCard = useCallback(() => {
-    const id = wanted.current;
-    const card = id ? scrollRef.current?.querySelector<HTMLElement>(`[data-proposal-id="${CSS.escape(id)}"]`) : null;
-    if (!card) {
+  const [seeking, setSeeking] = useState<Wanted["kind"] | null>(null);
+  // A quoted message not found, said there for a moment.
+  const [missed, setMissed] = useState<Missed | null>(null);
+  useEffect(() => {
+    if (!missed) return;
+    const t = window.setTimeout(() => setMissed(null), MISSED_MS);
+    return () => window.clearTimeout(t);
+  }, [missed]);
+  const focusWanted = useCallback(() => {
+    const want = wanted.current;
+    if (!want) return;
+    const el = scrollRef.current;
+    const found = el?.querySelector<HTMLElement>(
+      want.kind === "card" ? `[data-proposal-id="${CSS.escape(want.id)}"]` : `[data-turn-id="${CSS.escape(want.id)}"]`,
+    );
+    if (!found && want.kind === "card") {
       // Older than what is loaded: its turn is on a page above. The view stays
       // where it is and the turns come in behind it until the card is among them.
-      if (id && hasMore && !loadingOlder && !olderFailed && byId.has(id)) {
-        setSeeking(true);
+      if (hasMore && !loadingOlder && !olderFailed && byId.has(want.id)) {
+        setSeeking("card");
         void loadOlder();
-      } else if (id && (!hasMore || olderFailed)) {
-        // Nowhere further to look.
+      } else if (olderFailed || (!hasMore && byId.has(want.id))) {
+        // Nowhere further to look. One not known yet may still come with
+        // the thread being read, and is waited for.
         wanted.current = null;
-        setSeeking(false);
+        setSeeking(null);
       }
       return;
     }
+    if (!found) {
+      // A page on its way - the one asked for, or one a scroll asked for.
+      if (!el || loadingOlder) return;
+      // The page above a tap is asked for even if the last one failed (a tap
+      // is a tap); failing again, or read to the start, or as far as one tap
+      // reads, it stops and says so.
+      const failed = olderFailed && want.pages > 0;
+      if (failed || !hasMore || want.pages >= QUOTE_PAGES) {
+        wanted.current = null;
+        setSeeking(null);
+        setMissed(
+          failed
+            ? { text: "이전 대화를 불러오지 못했어요.", failed: true }
+            : hasMore
+              ? { text: "아직 못 찾았어요. 다시 누르면 더 앞을 찾아요.", failed: false }
+              : { text: "인용한 메시지를 대화에서 찾지 못했어요.", failed: false },
+        );
+        return;
+      }
+      // The page asked for has come and is being laid in front.
+      if (above.current) return;
+      want.pages += 1;
+      setSeeking("turn");
+      askOlder(el, true);
+      return;
+    }
     wanted.current = null;
-    setSeeking(false);
-    held.current = card;
+    setSeeking(null);
+    held.current = found;
+    if (want.kind === "turn") {
+      // Marked the way a tapped push marks a card.
+      scroller.current?.scrollToMessage(want.id, { align: "nearest" });
+      found.scrollIntoView({ block: "center" });
+      found.classList.remove("turn-flash");
+      void found.offsetWidth;
+      found.classList.add("turn-flash");
+      return;
+    }
     // To its row through the scroller, so it stops following the bottom,
     // then the card itself to the middle - as near as the thread's ends let
     // it: the scroller's own centring would pad the bottom with blank room
     // to put a card just raised in the middle. At once, not smooth: from the
     // bottom of a long thread a smooth scroll is a long ride, and its first
     // frames still read as "at the bottom".
-    const row = card.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+    const row = found.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
     if (row) scroller.current?.scrollToMessage(row, { align: "nearest" });
-    card.scrollIntoView({ block: "center" });
-    card.classList.remove("card-flash");
-    void card.offsetWidth; // restart the animation on a second tap
-    card.classList.add("card-flash");
+    found.scrollIntoView({ block: "center" });
+    found.classList.remove("card-flash");
+    void found.offsetWidth; // restart the animation on a second tap
+    found.classList.add("card-flash");
     const url = new URL(window.location.href);
     if (url.searchParams.has("proposal")) {
       url.searchParams.delete("proposal");
       window.history.replaceState(window.history.state, "", url.pathname + url.search);
     }
-  }, [hasMore, loadingOlder, olderFailed, byId, loadOlder, scrollRef]);
-  // 결재하기 here: to the card where it stands, not to another screen.
-  const goToCard = useCallback(
-    (id: string) => {
-      wanted.current = id;
-      focusCard();
+  }, [hasMore, loadingOlder, olderFailed, byId, loadOlder, askOlder, scrollRef]);
+  const goTo = useCallback(
+    (kind: Wanted["kind"], id: string) => {
+      wanted.current = { kind, id, pages: 0 };
+      setMissed(null);
+      focusWanted();
     },
-    [focusCard],
+    [focusWanted],
   );
+  // The same functions however the paging goes: every row of the transcript
+  // is handed jumpTo, and drawn again when it changes.
+  const latestGoTo = useRef(goTo);
   useEffect(() => {
-    wanted.current = new URLSearchParams(window.location.search).get("proposal");
-    return onFocusProposal((id) => {
-      wanted.current = id;
-      focusCard();
-    });
-  }, [focusCard]);
+    latestGoTo.current = goTo;
+  });
+  // 결재하기 here: to the card where it stands, not to another screen.
+  const goToCard = useCallback((id: string) => latestGoTo.current("card", id), []);
+  // A quote tapped in a bubble: back to the message it quotes.
+  const jumpTo = useCallback((id: string) => latestGoTo.current("turn", id), []);
+  // Read once, not again as the looking above goes on: put back on every
+  // page that came, ?proposal= took over whatever was being gone to.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("proposal");
+    if (id) wanted.current = { kind: "card", id, pages: 0 };
+    return onFocusProposal(goToCard);
+  }, [goToCard]);
   useEffect(() => {
     if (!wanted.current) return;
     // A frame later: the first rows a page brings are landed at the bottom
     // by the scroller as they come in, and that landing must not come after
     // this one.
-    const frame = requestAnimationFrame(focusCard);
+    const frame = requestAnimationFrame(focusWanted);
     return () => cancelAnimationFrame(frame);
-  }, [turns, proposals, loadingOlder, focusCard]);
+  }, [turns, proposals, loadingOlder, focusWanted]);
   // The reader taking over - a touch, a wheel, typing, anywhere on the page
   // (the composer is outside the thread) - lets go of a held card.
   useEffect(() => {
@@ -374,22 +450,6 @@ export function useThreadScroll({
       if (el.scrollHeight - el.scrollTop - el.clientHeight > 2) scroller.current?.scrollToEnd();
     }, 700);
   }, [finger, scrollRef]);
-
-  // A quote tapped in a bubble goes back to the message it quotes, and marks
-  // it the way a tapped push marks a card.
-  const jumpTo = useCallback(
-    (id: string) => {
-      const row = scrollRef.current?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(id)}"]`);
-      if (!row) return;
-      held.current = row;
-      scroller.current?.scrollToMessage(id, { align: "nearest" });
-      row.scrollIntoView({ block: "center" });
-      row.classList.remove("turn-flash");
-      void row.offsetWidth;
-      row.classList.add("turn-flash");
-    },
-    [scrollRef],
-  );
 
   // The bottom is the scroller's to keep as the page grows. A card a push
   // landed on is this screen's: photos above it finishing their layout push
@@ -502,6 +562,7 @@ export function useThreadScroll({
     away: away || unseen > 0,
     unseen,
     seeking,
+    missed,
     askOlder,
     goToCard,
     toNewest,

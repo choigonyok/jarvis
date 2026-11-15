@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ImagePlus, Info, Mic, Reply, X } from "lucide-react";
 import {
   Attachment,
@@ -22,6 +22,13 @@ import { cn } from "@/lib/utils";
 type Photo = { key: string; preview: string; name?: string; error?: string; file?: File };
 
 const MAX_PHOTOS = 12;
+
+/**
+ * What the field says once a photo is attached, unless told otherwise: on a
+ * phone only the example. The field is about 240px wide there at 16px, and
+ * the whole line broke just before its example - "사진에 대해 한마디 (예:".
+ */
+const PHOTO_HINT = { wide: "사진에 대해 한마디 (예: 중고나라에 올려줘)", narrow: "예: 중고나라에 올려줘" };
 
 /** The earlier message the next one will quote, as the composer shows it. */
 export type Quoting = { label: string; text: string };
@@ -89,7 +96,7 @@ function ComposerView({
   onVoice,
   onFocusChange,
   allowPhotos = false,
-  photoHint = "사진에 대해 한마디 (예: 중고나라에 올려줘)",
+  photoHint,
   quoting,
   onCancelQuote,
   inputRef,
@@ -108,7 +115,7 @@ function ComposerView({
   onVoice?: () => void;
   onFocusChange?: (focused: boolean) => void;
   allowPhotos?: boolean;
-  /** What the field says once a photo is attached. */
+  /** What the field says once a photo is attached; by default the owner's (PHOTO_HINT). */
   photoHint?: string;
   /** Set while a swiped message waits to be quoted by the next one. */
   quoting?: Quoting | null;
@@ -227,10 +234,22 @@ function ComposerView({
     if (!busy) setStopping(false);
   }
 
+  // How many of the photos last picked did not fit, and the line under the
+  // strip that says so - and, while it is full, why the photo button is dimmed.
+  // Twenty picked came in as twelve, and nothing said eight had been left.
+  const [leftOut, setLeftOut] = useState(0);
+  const full = photos.length >= MAX_PHOTOS;
+  const limitId = useId();
+  const quoteId = useId();
+  // Asked only with a photo attached, which is only ever in the browser: the
+  // server's render never reads the width.
+  const attachedHint = () => photoHint ?? (window.innerWidth < 640 ? PHOTO_HINT.narrow : PHOTO_HINT.wide);
+
   function attach(files: FileList | File[] | null) {
     if (!files) return;
-    const room = MAX_PHOTOS - photos.length;
-    const picked = Array.from(files).slice(0, Math.max(0, room));
+    const all = Array.from(files);
+    const picked = all.slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    setLeftOut(all.length - picked.length);
     const added = picked.map((file) => ({
       key: `${Date.now()}-${Math.random()}`,
       preview: URL.createObjectURL(file),
@@ -262,6 +281,7 @@ function ComposerView({
   }
 
   function remove(key: string) {
+    setLeftOut(0);
     setPhotos((cur) => {
       const gone = cur.find((p) => p.key === key);
       if (gone) URL.revokeObjectURL(gone.preview);
@@ -275,14 +295,18 @@ function ComposerView({
     const sent = photos;
     type("");
     setPhotos([]);
+    setLeftOut(0);
     // A thumb on the button is done typing: the keyboard goes, and the answer
     // gets the screen. Enter and a mouse keep the field, the next line follows.
     if (closeKeyboard) areaRef.current?.blur();
     else areaRef.current?.focus();
     const ok = await onSend(text, sent.filter((p) => p.name).map((p) => p.name!));
     if (ok === false) {
-      type(text);
-      setPhotos(sent);
+      // Back in the field, ahead of anything typed while it was going: put
+      // back as it was, it wrote over the next message begun meanwhile.
+      const since = areaRef.current?.value ?? "";
+      type(since.trim() ? `${text}\n${since}` : text);
+      setPhotos((cur) => [...sent, ...cur]);
       return;
     }
     for (const p of sent) URL.revokeObjectURL(p.preview);
@@ -337,7 +361,7 @@ function ComposerView({
       {quoting ? (
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
           <Reply aria-hidden className="mt-[3px] size-3.5 shrink-0 text-faint" />
-          <div className="min-w-0 flex-1">
+          <div id={quoteId} className="min-w-0 flex-1">
             <p className="text-aside leading-snug text-dim">{quoting.label}</p>
             <p className="truncate text-aside leading-snug text-faint">{quoting.text}</p>
           </div>
@@ -406,6 +430,11 @@ function ComposerView({
           })}
         </AttachmentGroup>
       ) : null}
+      {photos.length > 0 && (full || leftOut > 0) ? (
+        <p id={limitId} role="status" className="px-2.5 pb-1 text-meta leading-snug text-dim">
+          사진은 한 번에 {MAX_PHOTOS}장까지예요.{leftOut > 0 ? ` ${leftOut}장은 넣지 못했어요.` : ""}
+        </p>
+      ) : null}
 
       <div ref={rowRef} className="flex items-end">
         {allowPhotos ? (
@@ -425,8 +454,10 @@ function ComposerView({
               ref={photoRef}
               type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={photos.length >= MAX_PHOTOS}
+              disabled={full}
               aria-label="사진 첨부"
+              aria-describedby={full ? limitId : undefined}
+              title={full ? `사진은 한 번에 ${MAX_PHOTOS}장까지예요` : undefined}
               className={cn(round, "text-faint hover:text-foreground disabled:opacity-40")}
             >
               <ImagePlus aria-hidden className="size-5" strokeWidth={1.8} />
@@ -476,12 +507,15 @@ function ComposerView({
             quoting
               ? "이걸로 무엇을 할까요?"
               : photos.length
-                ? photoHint
+                ? attachedHint()
                 : busy
                   ? "끝나면 이어서 보낼 말"
                   : "Jarvis에게 메시지"
           }
           aria-label="Jarvis에게 보낼 메시지"
+          // Quoting brings the focus here: to a screen reader, the field says
+          // what it answers.
+          aria-describedby={quoting ? quoteId : undefined}
           // What is typed here is kept (draftKey): the page may be reloaded under it.
           data-keeps-draft={draftKey ? "" : undefined}
           className={cn(
