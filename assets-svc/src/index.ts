@@ -17,7 +17,7 @@ import type { Allocation, Holding, Outflow, OutflowUse, Portfolio } from "./type
 import { announce, halfRead } from "./notify.js";
 import { PARKED_DAYS, tolerance } from "./outflows.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
-import { placeOrders, requestsOf, type OrderRequest } from "./orders.js";
+import { Unchecked, placeOnce, placeOrders, requestsOf, type OrderRequest } from "./orders.js";
 import { affordable, cancelStanding, nyClock, standingPass } from "./standing.js";
 import { depositPlan, rebalancePlan } from "./trade-plan.js";
 
@@ -309,10 +309,11 @@ function requestOf(raw: unknown): OrderRequest {
 
 /**
  * GET /orders: the latest orders placed. POST /orders: place these
- * ({orders, reason, planId?, dryRun?}). POST /orders/rebalance: the current
- * rebalance plan, checked (dryRun) or placed. Placing reads the brokerages
- * afresh first - what is held now, not ten seconds ago - and the next look
- * at the portfolio is fresh too.
+ * ({orders, reason, planId?, dryRun?}) - a planId once: one that has placed
+ * answers what it placed, with replay: true (orders.ts placeOnce). POST
+ * /orders/rebalance: the current rebalance plan, checked (dryRun) or placed.
+ * Placing reads the brokerages afresh first - what is held now, not ten
+ * seconds ago - and the next look at the portfolio is fresh too.
  */
 async function orders(
   req: import("node:http").IncomingMessage,
@@ -332,9 +333,10 @@ async function orders(
     orders?: unknown[]; reason?: unknown; planId?: unknown; dryRun?: unknown;
   } | null;
   const dryRun = body?.dryRun === true;
-  const p = JSON.parse(await portfolioJson(!dryRun)) as {
-    holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null; problems?: string[];
-  };
+  const portfolio = async () =>
+    JSON.parse(await portfolioJson(!dryRun)) as {
+      holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null; problems?: string[];
+    };
   const placed = () => {
     if (dryRun) return;
     invalidateVenues();
@@ -348,17 +350,19 @@ async function orders(
       send(res, 400, { error: "주문이 1~12개 필요합니다." });
       return;
     }
-    const out = await placeOrders(list.map(requestOf), p.holdings, {
+    const out = await placeOnce(list.map(requestOf), async () => (await portfolio()).holdings, {
       reason: typeof body?.reason === "string" ? body.reason.slice(0, 40) : "manual",
-      planId: typeof body?.planId === "string" ? body.planId.slice(0, 40) : undefined,
+      // An empty planId is none: as one, every send without a name would be the same send.
+      planId: typeof body?.planId === "string" && body.planId ? body.planId.slice(0, 40) : undefined,
       dryRun,
     });
-    placed();
+    if (!out.replay) placed();
     send(res, 200, out);
     return;
   }
 
   if (url.pathname === "/orders/rebalance") {
+    const p = await portfolio();
     if (!p.allocation) {
       send(res, 503, { error: "목표 비중을 계산하지 못했습니다." });
       return;
@@ -518,6 +522,12 @@ const server = createServer((req, res) => {
 
   if (url.pathname === "/orders" || url.pathname === "/orders/rebalance") {
     void orders(req, res, url).catch((e: Error) => {
+      // Refused before anything went, so a 4xx: the console takes a 5xx for
+      // an order that may have gone.
+      if (e instanceof Unchecked) {
+        send(res, 409, { error: e.message });
+        return;
+      }
       console.error("주문을 처리하지 못했습니다:", e.message);
       send(res, 502, { error: "주문을 처리하지 못했습니다." });
     });

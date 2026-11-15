@@ -469,34 +469,55 @@ export async function recordOrder(o: OrderRow): Promise<void> {
   }
 }
 
+const orderCols = `id, created_at, venue, symbol, side, units, amount_krw, limit_price, currency, reason, plan_id, status, broker_id, message`;
+
+type OrderDbRow = {
+  id: string; created_at: Date; venue: OrderRow["venue"]; symbol: string; side: OrderRow["side"];
+  units: string | null; amount_krw: string; limit_price: string | null; currency: OrderRow["currency"];
+  reason: string; plan_id: string | null; status: OrderRow["status"]; broker_id: string | null; message: string;
+};
+
+const orderOf = (r: OrderDbRow): OrderRow => ({
+  id: Number(r.id),
+  createdAt: r.created_at.toISOString(),
+  venue: r.venue,
+  symbol: r.symbol,
+  side: r.side,
+  units: r.units === null ? null : Number(r.units),
+  amountKrw: Number(r.amount_krw),
+  limitPrice: r.limit_price === null ? null : Number(r.limit_price),
+  currency: r.currency,
+  reason: r.reason,
+  planId: r.plan_id,
+  status: r.status,
+  brokerId: r.broker_id,
+  message: r.message,
+});
+
 /** The latest orders, newest first. */
 export async function recentOrders(limit: number): Promise<OrderRow[]> {
   if (!pool) return [];
-  const { rows } = await pool.query<{
-    id: string; created_at: Date; venue: OrderRow["venue"]; symbol: string; side: OrderRow["side"];
-    units: string | null; amount_krw: string; limit_price: string | null; currency: OrderRow["currency"];
-    reason: string; plan_id: string | null; status: OrderRow["status"]; broker_id: string | null; message: string;
-  }>(
-    `select id, created_at, venue, symbol, side, units, amount_krw, limit_price, currency, reason, plan_id, status, broker_id, message
-       from asset_orders order by created_at desc, id desc limit $1`,
+  const { rows } = await pool.query<OrderDbRow>(
+    `select ${orderCols} from asset_orders order by created_at desc, id desc limit $1`,
     [limit],
   );
-  return rows.map((r) => ({
-    id: Number(r.id),
-    createdAt: r.created_at.toISOString(),
-    venue: r.venue,
-    symbol: r.symbol,
-    side: r.side,
-    units: r.units === null ? null : Number(r.units),
-    amountKrw: Number(r.amount_krw),
-    limitPrice: r.limit_price === null ? null : Number(r.limit_price),
-    currency: r.currency,
-    reason: r.reason,
-    planId: r.plan_id,
-    status: r.status,
-    brokerId: r.broker_id,
-    message: r.message,
-  }));
+  return rows.map(orderOf);
+}
+
+/**
+ * What one send wrote down, in the order it went: the rows of `planId`
+ * recorded in the last `withinMs`. Empty without a database. A record that
+ * cannot be read throws - it is not "nothing was sent".
+ */
+export async function planOrders(planId: string, withinMs: number): Promise<OrderRow[]> {
+  if (!pool) return [];
+  const { rows } = await pool.query<OrderDbRow>(
+    `select ${orderCols} from asset_orders
+      where plan_id = $1 and created_at > now() - make_interval(secs => $2)
+      order by id`,
+    [planId, withinMs / 1000],
+  );
+  return rows.map(orderOf);
 }
 
 /** A standing order (migration 057): placed again each trading day until filled. */

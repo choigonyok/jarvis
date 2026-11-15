@@ -14,7 +14,8 @@ import { kisUsOrder, kisUsQuote, upbitOrder, upbitPrice } from "./venues.js";
  * (mind-svc act.Rebalance). This checks what it is given anyway - a share
  * not held is not sold, a sale is never larger than the holding, one order
  * and one plan have a ceiling - and writes every order down (asset_orders),
- * placed or refused.
+ * placed or refused. A send named by a planId goes once, however often the
+ * request arrives (placeOnce).
  *
  * Sells go first, so a rebalance's buys can use what they freed. Upbit
  * orders are market orders; KIS takes no market order for US shares, so a
@@ -155,7 +156,9 @@ export async function placeOrders(
         });
       }
     } catch (e) {
-      results.push({ ...base, status: "failed", message: (e as Error).message.slice(0, 300) });
+      // Said whatever was thrown: once an order may have gone this must not
+      // throw - placeOnce forgets a send that threw, as one that placed nothing.
+      results.push({ ...base, status: "failed", message: (e instanceof Error ? e.message : String(e)).slice(0, 300) });
     }
   }
 
@@ -179,4 +182,96 @@ export async function placeOrders(
     }
   }
   return { planId, results };
+}
+
+/** A send's answer: its planId and how each order went. */
+export type Sent = { planId: string; results: OrderResult[] };
+
+/**
+ * How long a planId answers for what it placed. A retry comes within
+ * minutes; the console's planIds are eight hex digits, so two sends years
+ * apart can share one, and the old must not answer for the new.
+ */
+const REPLAY_MS = 24 * 60 * 60_000;
+
+/**
+ * Sends with a planId in this process, under way or done. The entry goes in
+ * before anything is awaited, so of two requests for one planId the second
+ * always finds the first: Node runs one thing at a time, and there is one
+ * assets-svc.
+ */
+const sends = new Map<string, { sent: Promise<Sent>; doneAt?: number }>();
+
+/** Whether a planId went could not be read, so nothing was sent. */
+export class Unchecked extends Error {}
+
+/** A recorded order as the send's answer had it. */
+export function resultOf(r: db.OrderRow): OrderResult {
+  return {
+    venue: r.venue,
+    symbol: r.symbol,
+    side: r.side,
+    units: r.units,
+    amountKrw: r.amountKrw,
+    status: r.status,
+    message: r.message,
+    currency: r.currency,
+    ...(r.brokerId ? { brokerId: r.brokerId } : {}),
+    ...(r.limitPrice !== null ? { limitPrice: r.limitPrice } : {}),
+  };
+}
+
+/**
+ * POST /orders: check or place a list of orders - a send with a planId at
+ * most once. The console names each press with a planId, and mind a
+ * rebalance card with its own; a planId that has placed (a retry, the
+ * network carrying the request twice) places nothing again and answers what
+ * it placed, from the record, with replay. One that comes while the first is
+ * still out waits for it and answers the same. The accounts are read only for
+ * a send that goes.
+ *
+ * Checks (dryRun) and sends without a planId go as before: a check records
+ * nothing, so it never answers for a send, and a planId made here is new.
+ */
+export async function placeOnce(
+  requests: OrderRequest[],
+  holdings: () => Promise<Holding[]>,
+  opts: { reason: string; dryRun?: boolean; planId?: string },
+  deps: { place?: typeof placeOrders; recorded?: (planId: string) => Promise<db.OrderRow[]> } = {},
+): Promise<Sent & { replay: boolean }> {
+  const place = deps.place ?? placeOrders;
+  const planId = opts.planId;
+  if (opts.dryRun || !planId) return { ...(await place(requests, await holdings(), opts)), replay: false };
+
+  const now = Date.now();
+  for (const [id, s] of sends) if (s.doneAt !== undefined && now - s.doneAt > REPLAY_MS) sends.delete(id);
+  const first = sends.get(planId);
+  if (first) return { ...(await first.sent), replay: true };
+
+  const recorded = deps.recorded ?? ((id: string) => db.planOrders(id, REPLAY_MS));
+  let replay = false;
+  const entry: { sent: Promise<Sent>; doneAt?: number } = {
+    sent: (async () => {
+      const rows = await recorded(planId).catch((e: unknown) => {
+        console.error("주문 기록을 읽지 못했습니다:", e instanceof Error ? e.message : e);
+        throw new Unchecked("주문 기록을 읽지 못해 보내지 않았어요. 잠시 뒤 다시 보내 주세요.");
+      });
+      if (rows.length) {
+        replay = true;
+        return { planId, results: rows.map(resultOf) };
+      }
+      return place(requests, await holdings(), opts);
+    })(),
+  };
+  sends.set(planId, entry);
+  try {
+    const sent = await entry.sent;
+    entry.doneAt = Date.now();
+    return { ...sent, replay };
+  } catch (e) {
+    // Failed before any order went (the record or the accounts could not be
+    // read): forgotten, so the same planId can go once that is fixed.
+    if (sends.get(planId) === entry) sends.delete(planId);
+    throw e;
+  }
 }

@@ -52,13 +52,21 @@ KIS 가 거래소 코드에 따라 같은 보유를 중복해 돌려준다는 �
 | GET | `/portfolio` | 보유·총액·기간별 변동·곡선 |
 | GET | `/history?days=90` | 기록된 일별 총액 (스냅샷) |
 | GET | `/orders?limit=20` | 낸 주문 기록 |
-| POST | `/orders` | `{orders:[{venue, symbol, side, units, amountKrw}], reason, planId?, dryRun?}` 확인(dryRun)하거나 낸다 |
+| POST | `/orders` | `{orders:[{venue, symbol, side, units, amountKrw}], reason, planId?, dryRun?}` 확인(dryRun)하거나 낸다. 답은 `{planId, results, replay}` |
 | POST | `/orders/rebalance` | 지금 리밸런싱 계획을 확인(dryRun)하거나 낸다 |
 | GET | `/outflows` | 출금마다 어디로 갔나: 짝 찾은 옮김, 답, 물을 금액, 후보 입금 |
 | POST | `/outflows/answer` | `{key, flowKrw, use, amountKrw, category?, memo?}` 출금의 일부가 어디로 갔는지 적는다 |
 | DELETE | `/outflows/answer?key=` | 그 출금에 답한 것을 지운다(다시 묻게) |
 
 `/health` 외에는 `API_TOKEN` 베어러가 필요합니다.
+
+**같은 planId 는 한 번만 냅니다.** 콘솔은 누를 때마다, mind 는 리밸런싱 카드마다 planId 를 붙입니다.
+이미 주문을 낸 planId 로 다시 온 요청(답이 끊겨 다시 보낸 것, 네트워크가 두 번 나른 것)은 아무것도
+내지 않고 잔고도 다시 읽지 않은 채, 기록에 남은 그때의 결과를 `replay: true` 로 돌려줍니다. 처음 것이
+아직 나가는 중이면 끝나기를 기다렸다가 같은 답을 합니다 - 프로세스 안의 잠금이고, assets-svc 는
+하나입니다. 기록은 하루 안의 것만 봅니다: 다시 보내는 것은 몇 분 안에 오고, 콘솔의 planId 는 16진수
+8자라 몇 년이면 겹칠 수 있습니다. 기록을 읽지 못하면 내지 않고 409 로 답합니다(콘솔은 4xx 만 "가지
+않았다"로 읽습니다). 확인(dryRun)은 기록에 남지 않으므로 보낸 것을 대신하지도, 막지도 않습니다.
 
 **데이터베이스는 필수가 아닙니다.** 증권사가 현재 보유의 원천이고, 기간별
 변동은 과거 종가로 현재 바스켓을 다시 매겨 계산합니다. `DATABASE_URL` 이
