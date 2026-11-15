@@ -112,8 +112,13 @@ function newPlanId(): string {
   return id.replace(/-/g, "").slice(0, 8);
 }
 
-/** A send that got no answer, not in the record either once it has had time to be. */
-const NOT_IN_RECORD = "주문 기록에 없어요. 주문이 들어가지 않은 것 같아요.";
+/**
+ * A send that got no answer, not in the record either once it has had time to
+ * be. It may yet be on its way - a slow broker outlasts the look - so the same
+ * order sent again goes under the same planId, and assets-svc, which sends a
+ * planId once, answers it with what came of the first.
+ */
+const NOT_IN_RECORD = "주문 기록에 없어요. 주문이 들어가지 않은 것 같아요. 같은 주문을 다시 보내도 두 번 들어가지 않아요.";
 
 /**
  * In the send button's place while a send that got no answer back (lib/orders.ts
@@ -162,6 +167,9 @@ export function PlanSheet({
   const [error, setError] = useState<string | null>(null);
   // Sent with no answer back, and looked for in the record by its planId.
   const [looking, setLooking] = useState<{ planId: string; failed: boolean } | null>(null);
+  // The planId of a send that got no answer and was not found in the record:
+  // these same orders pressed again go under it (NOT_IN_RECORD).
+  const [again, setAgain] = useState<string | null>(null);
   // A check that did not come is asked again from here (다시 시도): it had
   // taken closing the sheet and opening it again.
   const [asked, setAsked] = useState(0);
@@ -173,6 +181,7 @@ export function PlanSheet({
     setChecked(null);
     setPlaced(null);
     setError(null);
+    setAgain(null);
     load()
       .then((c) => alive && setChecked(c))
       .catch((e: unknown) => alive && setError(failureText(e, SAY.couldNotLoad)));
@@ -193,16 +202,20 @@ export function PlanSheet({
       setError(null);
       setPlaced([...rows, ...unsent]);
       onPlaced();
-    } else setError(NOT_IN_RECORD);
+    } else {
+      setError(NOT_IN_RECORD);
+      setAgain(planId);
+    }
   };
   const send = async () => {
     // Its own planId, by which the record says what came of it when no answer
-    // does - each press its own, so one sent again is never taken for the last.
-    const planId = newPlanId();
+    // does - the one of the send that got none, when these same orders go again.
+    const planId = again ?? newPlanId();
     setBusy(true);
     setError(null);
     try {
       const out = await sendOrders(ready, { reason, planId });
+      setAgain(null);
       setPlaced([...out.results, ...unsent]);
       onPlaced();
     } catch (e) {
@@ -255,7 +268,7 @@ export function PlanSheet({
  * One holding's sheet while the app is open (lib/keep.ts): the order half
  * typed - with a planId, sent and its answer not here - or what came of it.
  */
-type Kept = { side: "buy" | "sell"; amount: string; planId?: string } | { sent: Outcome };
+type Kept = { side: "buy" | "sell"; amount: string; planId?: string; again?: string } | { sent: Outcome };
 
 /**
  * One holding: buy more or sell some. Shares by the share, a coin by the won.
@@ -282,6 +295,9 @@ export function OrderSheet({
   const [error, setError] = useState<string | null>(null);
   // Sent with no answer back, and looked for in the record by its planId.
   const [looking, setLooking] = useState<{ planId: string; failed: boolean } | null>(null);
+  // A send that got no answer and was not found in the record: the same order
+  // pressed again goes under its planId (NOT_IN_RECORD); another one does not.
+  const [again, setAgain] = useState<{ planId: string; side: "buy" | "sell"; amount: string } | null>(null);
 
   const look = async (id: string, planId: string, draft: { side: "buy" | "sell"; amount: string }) => {
     setLooking({ planId, failed: false });
@@ -291,11 +307,13 @@ export function OrderSheet({
     if (rows[0]) {
       setError(null);
       setResult(rows[0]);
+      setAgain(null);
       keepValue(`order:${id}`, { sent: rows[0] });
       onPlaced();
     } else {
       setError(NOT_IN_RECORD);
-      keepValue(`order:${id}`, draft);
+      setAgain({ planId, ...draft });
+      keepValue(`order:${id}`, { ...draft, again: planId });
     }
   };
 
@@ -313,6 +331,7 @@ export function OrderSheet({
     setAmount(draft?.amount ?? "");
     setResult(kept && "sent" in kept ? kept.sent : null);
     setError(null);
+    setAgain(draft?.again ? { planId: draft.again, side: draft.side, amount: draft.amount } : null);
     if (holdingId && draft?.planId) void look(holdingId, draft.planId, { side: draft.side, amount: draft.amount });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per holding; the sheet is keyed by it (assets.tsx)
   }, [holdingId]);
@@ -322,7 +341,7 @@ export function OrderSheet({
     const draft = { side, amount, ...next };
     setSide(draft.side);
     setAmount(draft.amount);
-    if (holding) keepValue(`order:${holding.id}`, draft.amount ? draft : undefined);
+    if (holding) keepValue(`order:${holding.id}`, draft.amount ? { ...draft, again: again?.planId } : undefined);
   };
 
   if (!holding) return null;
@@ -350,8 +369,10 @@ export function OrderSheet({
 
   const send = async () => {
     // Its own planId, by which the record says what came of it when no answer
-    // does - each press its own, so one sent again is never taken for the last.
-    const planId = newPlanId();
+    // does - each new order its own, and the one of the send that got none
+    // when the very same order goes again (assets-svc sends a planId once).
+    const same = again && again.side === side && again.amount === amount;
+    const planId = same ? again.planId : newPlanId();
     const draft = { side, amount };
     setBusy(true);
     setError(null);
@@ -359,6 +380,7 @@ export function OrderSheet({
     try {
       const out = await sendOrders([req], { reason: "manual", planId });
       const sent = out.results[0] ?? null;
+      setAgain(null);
       setResult(sent);
       setAmount("");
       keepValue(`order:${holding.id}`, sent ? { sent } : undefined);
@@ -366,8 +388,9 @@ export function OrderSheet({
     } catch (e) {
       setError(failureText(e, "주문을 보내지 못했어요."));
       if (e instanceof Unanswered) void look(holding.id, planId, draft);
-      // Turned down: nothing went, and the form is half typed again.
-      else keepValue(`order:${holding.id}`, draft);
+      // Turned down: nothing went, and the form is half typed again - still
+      // under the planId of a send that got no answer, if there was one.
+      else keepValue(`order:${holding.id}`, { ...draft, again: again?.planId });
     } finally {
       setBusy(false);
     }
