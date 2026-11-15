@@ -12,7 +12,7 @@ import {
   shiftMonth,
   type Cursor,
 } from "@/lib/month";
-import type { Session } from "@/lib/workout";
+import { cellName, dayLabel, type Session } from "@/lib/workout";
 import { cn } from "@/lib/utils";
 
 /**
@@ -106,15 +106,19 @@ export function WorkoutCalendar({
           const done = byDate.get(cell.date);
           const isToday = cell.date === today;
           const chosen = selected === cell.date;
-          const label = done
-            ? `${cell.date}, ${done.map((s) => s.routineName ?? "운동").join(", ")}`
-            : cell.date;
+          // A day as the rest of the screen names one ("오늘", "11월 14일
+          // (금)"), and what was trained: read out, the cells had been
+          // "2026-11-14", or for a day without training only its number.
+          const label = `${dayLabel(cell.date)}, ${
+            done ? done.map((s) => s.routineName ?? "운동").join(", ") : "운동 없음"
+          }`;
           // A trained day is filled; an untrained one is just a number. No
           // dots, no legend - the month reads as a pattern of blocks, which
           // is what "am I keeping it up" actually looks like.
           const body = (
             <>
               <span
+                aria-hidden
                 className={cn(
                   "tnum text-aside leading-none",
                   !cell.inMonth && "text-faint",
@@ -125,8 +129,9 @@ export function WorkoutCalendar({
                 {cell.day}
               </span>
               {done ? (
-                <span className="max-w-full truncate px-0.5 text-meta leading-none text-approve">
-                  {done[0].routineName ?? "운동"}
+                <span aria-hidden className="flex max-w-full items-baseline px-0.5 text-meta leading-none text-approve">
+                  <span className="truncate">{cellName(done[0])}</span>
+                  {done.length > 1 ? <span className="shrink-0 text-tiny">+{done.length - 1}</span> : null}
                 </span>
               ) : null}
             </>
@@ -148,7 +153,9 @@ export function WorkoutCalendar({
               {body}
             </button>
           ) : (
-            <div key={cell.date} aria-label={label} className={shape}>
+            // Words, not a label: a label on a plain box is not read.
+            <div key={cell.date} className={shape}>
+              <span className="sr-only">{label}</span>
               {body}
             </div>
           );

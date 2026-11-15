@@ -42,6 +42,13 @@ type Changes = {
 
 const UNSENT = "jarvis.workout.unsent";
 
+// Which running session is this device's. A session does not say whose it is
+// (the book is one for the two of us), so the first one not yet ended was
+// opened as this phone's own: the partner's workout under this thumb, no 시작
+// for one's own, and a set pressed on it sent this phone's copy over theirs.
+// A device knows the one it started, or the one it was asked to carry on.
+const MINE = "jarvis.workout.mine";
+
 function diff(from: Book, to: Book): Changes | null {
   const before = new Map(from.sessions.map((s) => [s.id, JSON.stringify(s)]));
   const ids = new Set(to.sessions.map((s) => s.id));
@@ -89,6 +96,11 @@ export function useWorkout() {
   const saved = useRef<Book>(book);
   const sending = useRef(false);
   const again = useRef(false);
+  const [mine, setMine] = useState<string | null>(() => local.get<string>(MINE));
+  const own = useCallback((id: string) => {
+    setMine(id);
+    local.set(MINE, id);
+  }, []);
 
   // One save at a time, and whatever came while it was on its way right after
   // it: two at once could land in either order, the older one last.
@@ -136,6 +148,10 @@ export function useWorkout() {
       const kept = local.get<Changes>(UNSENT);
       const next = kept ? overlay(data, kept) : data;
       setBook(next);
+      // Another tab of this browser may have started one since. Storage that
+      // keeps nothing leaves this page's own as it was.
+      const stored = local.get<string>(MINE);
+      if (stored) setMine(stored);
       latest.current = next;
       saved.current = data;
       setReadAt(new Date());
@@ -211,7 +227,25 @@ export function useWorkout() {
     };
   }, []);
 
-  const live = book.sessions.find((s) => !s.endedAt) ?? null;
+  const running = book.sessions.filter((s) => !s.endedAt);
+  const live = running.find((s) => s.id === mine) ?? null;
+  // Running and not this device's: the partner's, or one started on another
+  // phone. Not opened here unless asked, and never ended or written over.
+  const elsewhere = live
+    ? null
+    : running.reduce<Session | null>((a, s) => (!a || s.startedAt > a.startedAt ? s : a), null);
+
+  /**
+   * Carry on here a session started elsewhere - this person's own, begun on
+   * another device. Read again on the way, for the sets logged there since.
+   */
+  const continueHere = useCallback(
+    (id: string) => {
+      own(id);
+      void reload();
+    },
+    [own, reload],
+  );
 
   /**
    * Start a session, optionally carrying over the shape of an earlier one.
@@ -237,9 +271,10 @@ export function useWorkout() {
         startedAt: Date.now(),
       };
       update((b) => ({ ...b, sessions: [...b.sessions, session] }));
+      own(session.id);
       return session.id;
     },
-    [update],
+    [update, own],
   );
 
   /**
@@ -253,6 +288,9 @@ export function useWorkout() {
     (routine: Routine) => {
       const stamp = Date.now();
       update((b) => {
+        // From finished sessions only: one running on another phone is
+        // somebody's sets in the making, not this one's last time.
+        const done = b.sessions.filter((s) => s.endedAt);
         const session: Session = {
           id: `w-${stamp}`,
           date: today(),
@@ -261,15 +299,16 @@ export function useWorkout() {
           exercises: routine.exercises.map((name, i) => ({
             id: `e-${stamp}-${i}`,
             name,
-            sets: carrySets(b.sessions, name),
+            sets: carrySets(done, name),
           })),
           startedAt: stamp,
         };
         return { ...b, sessions: [...b.sessions, session] };
       });
+      own(`w-${stamp}`);
       return `w-${stamp}`;
     },
-    [update],
+    [update, own],
   );
 
   const saveRoutines = useCallback(
@@ -352,7 +391,10 @@ export function useWorkout() {
           {
             id: `e-${Date.now()}`,
             name,
-            sets: carrySets(latest.current.sessions, name),
+            sets: carrySets(
+              latest.current.sessions.filter((other) => other.endedAt || other.id === id),
+              name,
+            ),
           },
         ],
       }));
@@ -412,6 +454,8 @@ export function useWorkout() {
     book,
     routines,
     live,
+    elsewhere,
+    continueHere,
     readAt,
     readError,
     unsent,

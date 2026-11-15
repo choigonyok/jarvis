@@ -4,9 +4,12 @@ import { useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import {
   MUSCLE_GROUPS,
+  bestSet,
   dayLabel,
   exerciseHistory,
   groupOf,
+  heaviest,
+  load,
   recentExercises,
   type Session,
 } from "@/lib/workout";
@@ -23,12 +26,23 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
   const rows = useMemo(
     () =>
       recentExercises(sessions).map((r) => {
-        const trend = exerciseHistory(sessions, r.name)
-          .map((h) => h.oneRm)
-          .filter((v): v is number => v !== null)
+        const history = exerciseHistory(sessions, r.name);
+        // The best ever, as the movement's sheet says it - the line is the
+        // recent sessions, the number is not only theirs.
+        const best = bestSet(sessions, r.name)?.oneRm ?? null;
+        const top = heaviest(sessions, r.name);
+        // Past 12 reps every time there is no honest 1RM: a lift done light
+        // for many reps is read by its heaviest load. It had been called 맨몸.
+        const trend = (
+          best !== null
+            ? history.map((h) => h.oneRm).filter((v): v is number => v !== null)
+            : top > 0
+              ? history.map((h) => Math.max(0, ...h.sets.filter((s) => !s.warmup).map((s) => s.weight)))
+              : []
+        )
           .slice(0, 8)
           .reverse();
-        return { ...r, group: groupOf(r.name), trend, best: trend.length ? Math.max(...trend) : null };
+        return { ...r, group: groupOf(r.name), trend, best, top };
       }),
     [sessions],
   );
@@ -63,7 +77,7 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
                       <span className="block truncate text-title text-foreground">{row.name}</span>
                       <span className="block truncate text-aside text-faint">마지막 {dayLabel(row.date)}</span>
                     </span>
-                    <Trend values={row.trend} />
+                    <Trend values={row.trend} of={row.best !== null ? "1RM" : "무게"} />
                     <span className="w-16 shrink-0 text-right">
                       {row.best !== null ? (
                         <>
@@ -71,6 +85,13 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
                             {Math.round(row.best)}
                           </span>
                           <span className="block text-meta text-faint">1RM kg</span>
+                        </>
+                      ) : row.top > 0 ? (
+                        <>
+                          <span className="font-score tnum block text-[22px] leading-none font-semibold text-foreground">
+                            {load(row.top)}
+                          </span>
+                          <span className="block text-meta text-faint">최고 kg</span>
                         </>
                       ) : (
                         <span className="text-aside text-faint">맨몸</span>
@@ -88,8 +109,8 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
   );
 }
 
-/** The last few sessions' 1RM as a line, the latest end marked. Nothing for a single point. */
-function Trend({ values }: { values: number[] }) {
+/** The last few sessions' 1RM (or top load) as a line, the latest end marked. Nothing for a single point. */
+function Trend({ values, of }: { values: number[]; of: "1RM" | "무게" }) {
   if (values.length < 2) return <span aria-hidden className="w-16 shrink-0" />;
   const w = 64;
   const h = 22;
@@ -105,7 +126,11 @@ function Trend({ values }: { values: number[] }) {
       height={h}
       viewBox={`0 0 ${w} ${h}`}
       role="img"
-      aria-label={`추정 1RM ${values.map((v) => Math.round(v)).join(", ")}kg`}
+      aria-label={
+        of === "1RM"
+          ? `추정 1RM ${values.map((v) => Math.round(v)).join(", ")}kg`
+          : `최고 무게 ${values.map((v) => load(v)).join(", ")}kg`
+      }
       className="shrink-0"
     >
       <polyline

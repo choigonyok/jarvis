@@ -66,9 +66,13 @@ export function RoutineEditor({
   const dirty = open && JSON.stringify(draft) !== JSON.stringify(routines);
   const [asking, setAsking] = useState(false);
 
+  // The picker opens over the editor rather than in its place: closed and
+  // opened again in one stroke, each left its back entry behind (two for a
+  // movement added, for the back gesture to spend), and the editor came back
+  // scrolled to its top.
   return (
     <>
-      <Panel open={open && adding === null} onOpenChange={onOpenChange} title="루틴 편집" guard={dirty}>
+      <Panel open={open} onOpenChange={onOpenChange} title="루틴 편집" guard={dirty}>
         <div className="space-y-6">
           {draft.map((routine) => (
             <section key={routine.id} aria-label={routine.name || "새 루틴"}>
@@ -87,9 +91,10 @@ export function RoutineEditor({
                     variant="discard"
                     size="touch-sm"
                     onClick={() => setDraft((d) => d.filter((r) => r.id !== routine.id))}
+                    aria-label={`${routine.name || "새 루틴"} 지우기`}
                     className="shrink-0"
                   >
-                    삭제
+                    지우기
                   </Button>
                 ) : null}
               </div>

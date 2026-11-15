@@ -7,7 +7,7 @@ import { ExercisePicker } from "@/components/workout/exercise-picker";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
-import { local, primeChime, useNow, useWakeLock } from "@/lib/use-gym";
+import { local, primeChime, useChimeReady, useNow, useWakeLock } from "@/lib/use-gym";
 import {
   bestSet,
   clock,
@@ -97,6 +97,7 @@ export function LiveSession({
 }) {
   const now = useNow();
   useWakeLock(true);
+  useChimeReady(true);
 
   const [picking, setPicking] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
@@ -184,6 +185,8 @@ export function LiveSession({
     const exercise = session.exercises.find((e) => e.id === ref.exerciseId);
     const set = exercise?.sets[ref.index];
     if (!exercise || !set) return;
+    // A set of no reps is not logged (the dock and the list say so).
+    if (!set.done && set.reps === 0) return;
     const done = !set.done;
     onPatchSets(ref.exerciseId, (c) =>
       c.map((s, j) => (j === ref.index ? { ...s, done } : s)),
@@ -295,7 +298,14 @@ export function LiveSession({
     const set = exercise?.sets[ref.index];
     if (!exercise || !set) return;
     onPatchSets(ref.exerciseId, (c) => c.filter((_, j) => j !== ref.index));
-    setChosen(null);
+    // The dock stays on the set it was on - or, if that is the one gone, on
+    // the row that moved up into the gap. It had jumped to the first set
+    // left anywhere, closing the movement being edited, and the next press
+    // was on another movement's numbers.
+    const left = exercise.sets.length - 1;
+    const at = focus?.exerciseId === ref.exerciseId ? focus.index : ref.index;
+    const index = at > ref.index ? at - 1 : Math.min(at, left - 1);
+    setChosen(left > 0 ? { exerciseId: exercise.id, index } : null);
     onUndoable(`${exercise.name} 세트를 지웠어요`, () =>
       onPatchSets(ref.exerciseId, (c) => {
         const out = [...c];
@@ -530,6 +540,9 @@ export function LiveSession({
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          <p className="mt-1.5 text-aside leading-relaxed text-dim">
+            휴식이 끝나면 이 화면에서 소리로 알려요. 무음 모드인 아이폰에서는 소리가 나지 않아요.
+          </p>
         </div>
       </section>
 
@@ -564,7 +577,6 @@ export function LiveSession({
             ),
           )
         }
-        onRemoveSet={removeSet}
         onAddExercise={() => setPicking(true)}
         onAddSet={() => {
           const last = session.exercises.at(-1);

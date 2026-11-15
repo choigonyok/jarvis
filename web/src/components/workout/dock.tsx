@@ -41,7 +41,6 @@ export function Dock({
   onField,
   onToggle,
   onWarmup,
-  onRemoveSet,
   onAddExercise,
   onAddSet,
   onFinish,
@@ -61,7 +60,6 @@ export function Dock({
   onField: (ref: SetRef, field: "weight" | "reps", value: number) => void;
   onToggle: (ref: SetRef) => void;
   onWarmup: (ref: SetRef) => void;
-  onRemoveSet: (ref: SetRef) => void;
   onAddExercise: () => void;
   onAddSet: () => void;
   onFinish: () => void;
@@ -137,25 +135,22 @@ export function Dock({
                   {set.warmup ? `워밍업 ${nth}` : `${nth}세트`}
                 </span>
               </p>
+              {/* Kept clear of the + below the corner, the control pressed
+                  every set. Throwing a set away is not on the dock: it is the
+                  list's 편집, a mode, as the list keeps it - over the +, a
+                  slip took a set and moved the dock on to another. */}
               <button
                 type="button"
                 onClick={() => onWarmup(focus)}
                 aria-pressed={Boolean(set.warmup)}
                 className={cn(
-                  "min-h-11 shrink-0 rounded-md px-2.5 text-aside transition-colors focus-ring",
+                  "me-11 min-h-11 shrink-0 rounded-md px-2.5 text-aside transition-colors focus-ring",
                   set.warmup
                     ? "bg-glass-raised text-foreground"
                     : "text-faint hover:text-dim",
                 )}
               >
                 워밍업
-              </button>
-              <button
-                type="button"
-                onClick={() => onRemoveSet(focus)}
-                className="min-h-11 shrink-0 rounded-md px-2.5 text-aside text-faint transition-colors hover:text-reject focus-ring"
-              >
-                세트 삭제
               </button>
             </div>
 
@@ -211,18 +206,30 @@ export function Dock({
               </span>
             </p>
 
+            {/* No reps, nothing lifted: a new movement starts at 0 × 0, and
+                the press that logs the others at once logged that as a set -
+                and next time's 지난번. */}
             <button
               type="button"
               onClick={() => onToggle(focus)}
+              disabled={!set.done && set.reps === 0}
               className={cn(
                 "mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-title font-medium transition-colors focus-ring",
                 set.done
                   ? "bg-glass text-dim hover:text-foreground"
-                  : "bg-approve-wash text-approve",
+                  : set.reps === 0
+                    ? "bg-glass text-faint"
+                    : "bg-approve-wash text-approve",
               )}
             >
-              <Check aria-hidden className="size-[18px]" />
-              {set.done ? "완료 취소" : "완료"}
+              {!set.done && set.reps === 0 ? (
+                "횟수를 넣어 주세요"
+              ) : (
+                <>
+                  <Check aria-hidden className="size-[18px]" />
+                  {set.done ? "완료 취소" : "완료"}
+                </>
+              )}
             </button>
           </>
         ) : empty ? (
@@ -314,9 +321,17 @@ export function RestStrip({
   const nudge = (by: number) =>
     onRest({ ...rest, target: Math.max(15, rest.target + by) });
 
+  // The moment it runs out on screen, the line lights up once: on a phone on
+  // mute the chime is silent, and a number turning green was all there was.
+  const ending = over && -left < 2000;
+
   return (
     <div className="mb-2.5 border-b border-edge-soft pb-2.5">
-      <div className="-mt-1 flex items-center gap-2">
+      {/* The timer itself is kept quiet; that it is over is said, once. */}
+      <span role="status" className="sr-only">
+        {over ? "휴식이 끝났어요" : ""}
+      </span>
+      <div className={cn("-mt-1 flex items-center gap-2 rounded-lg", ending && "card-flash")}>
         <span className="text-aside text-faint">휴식</span>
         <span
           role="timer"
@@ -412,8 +427,10 @@ export function Stepper({
               "",
             );
             setText(t);
+            // A field emptied to type a new number is not a 0. It had been,
+            // at once - carried on to the sets after it, and saved.
             const n = Number(t);
-            if (!Number.isNaN(n)) onChange(n);
+            if (t !== "" && !Number.isNaN(n)) onChange(n);
           }}
           onBlur={() => setText(null)}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}

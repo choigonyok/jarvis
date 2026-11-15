@@ -100,6 +100,16 @@ export function routinesOf(book: Book): Routine[] {
     : DEFAULT_ROUTINES;
 }
 
+/**
+ * A session's name in a day's cell, a few letters wide: "가슴/삼두" is 가슴.
+ * Cut at the edge it read "가슴/…"; the first part is what tells the days of
+ * a split apart.
+ */
+export function cellName(session: Session): string {
+  const name = session.routineName ?? "운동";
+  return name.split("/")[0].trim() || name;
+}
+
 /** When a routine was last trained, or null if never. */
 export function lastDone(sessions: Session[], routine: Routine): Session | null {
   const done = sessions
@@ -154,13 +164,23 @@ export function volumeOf(exercise: Exercise): number {
  *
  * An estimate, and only honest in the 1-10 rep range - past that it flatters
  * you badly. Shown as "추정" for that reason, and not at all above 12 reps.
+ * Shown in whole kilograms, and a record only when the whole number goes up:
+ * a tenth on one screen and not the next read as two different records.
  */
 export function estimate1RM(weight: number, reps: number): number | null {
   if (weight <= 0 || reps <= 0 || reps > 12) return null;
   return weight * (1 + reps / 30);
 }
 
-/** The best single set ever logged for a movement, by estimated 1RM. */
+/**
+ * The best single set ever logged for a movement, by estimated 1RM.
+ *
+ * Over finished sessions, as 최고 무게 (heaviest) and the record table
+ * (recordsOf) are: one number wherever 추정 1RM is shown - the lifts list, a
+ * movement's sheet, the records a session beat. A list that took the last
+ * eight sessions, and a sheet that counted one still running, had given one
+ * lift two numbers.
+ */
 export function bestSet(
   sessions: Session[],
   name: string,
@@ -170,6 +190,7 @@ export function bestSet(
     null;
 
   for (const session of sessions) {
+    if (!session.endedAt) continue;
     for (const exercise of session.exercises) {
       if (nameKey(exercise.name) !== normalized) continue;
       for (const set of exercise.sets) {
@@ -185,11 +206,12 @@ export function bestSet(
   return best;
 }
 
-/** Heaviest single working set ever, regardless of reps. */
+/** Heaviest single working set ever, regardless of reps - finished sessions, as bestSet. */
 export function heaviest(sessions: Session[], name: string): number {
   const normalized = nameKey(name);
   let top = 0;
   for (const session of sessions) {
+    if (!session.endedAt) continue;
     for (const exercise of session.exercises) {
       if (nameKey(exercise.name) !== normalized) continue;
       for (const set of exercise.sets) {
@@ -592,7 +614,7 @@ export function sessionRecords(
     }
     const best = bestSet(earlier, exercise.name);
     const mine = Math.max(...working.map((s) => estimate1RM(s.weight, s.reps) ?? 0));
-    if (best && mine > best.oneRm + 0.05) {
+    if (best && Math.round(mine) > Math.round(best.oneRm)) {
       out.push({ name: exercise.name, kind: "1RM", value: mine, before: best.oneRm });
     }
   }

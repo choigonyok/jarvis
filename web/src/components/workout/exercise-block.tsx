@@ -44,7 +44,9 @@ export function SetMap({
             onClick={() => onJump(exercise)}
             aria-label={`${exercise.name}, ${working.length}세트 중 ${done}세트 완료`}
             aria-current={here ? "step" : undefined}
-            className="flex h-11 items-center gap-[3px] rounded-lg px-1.5 hover:bg-glass focus-ring"
+            // A thumb wide however few its sets: a movement of one set was a
+            // 28px target between its neighbours.
+            className="flex h-11 min-w-11 items-center justify-center gap-[3px] rounded-lg px-1.5 hover:bg-glass focus-ring"
           >
             {exercise.sets.map((set, i) => (
               <span
@@ -164,7 +166,7 @@ export function ExerciseBlock({
     (top > 0 && working.some((s) => s.weight > top)) ||
     (best !== null &&
       working.some(
-        (s) => (estimate1RM(s.weight, s.reps) ?? 0) > best.oneRm + 0.05,
+        (s) => Math.round(estimate1RM(s.weight, s.reps) ?? 0) > Math.round(best.oneRm),
       ));
 
   // Warm-ups are W, working sets count 1, 2, 3 among themselves - a ramp
@@ -214,9 +216,11 @@ export function ExerciseBlock({
         </button>
       </div>
 
+      {/* Named as the movement's sheet names it: "최고" alone read as the
+          sheet's 최고 무게 or 최고 세트, which are other sets. */}
       {best ? (
         <p className="tnum mb-2 text-aside text-faint">
-          최고 {setLabel(best)} · 추정 1RM {Math.round(best.oneRm)}kg
+          추정 1RM {Math.round(best.oneRm)}kg ({setLabel(best)})
         </p>
       ) : null}
 
@@ -294,7 +298,7 @@ export function ExerciseBlock({
                   <button
                     type="button"
                     onClick={() => onRemoveSet(i)}
-                    aria-label={`${label.long} 삭제`}
+                    aria-label={`${label.long} 지우기`}
                     className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-reject-wash text-reject transition-colors focus-ring"
                   >
                     <Minus aria-hidden className="size-[18px]" />
@@ -302,16 +306,20 @@ export function ExerciseBlock({
                 ) : (
                   // Ticking a set is the most-pressed control in the app, so
                   // it is the only one in the list that carries the approve hue.
+                  // Not for no reps, as on the dock.
                   <button
                     type="button"
                     onClick={() => onToggle(i)}
+                    disabled={!set.done && set.reps === 0}
                     aria-pressed={set.done}
-                    aria-label={`${label.long} 완료`}
+                    aria-label={`${label.long} 완료${!set.done && set.reps === 0 ? ", 횟수를 넣어 주세요" : ""}`}
                     className={cn(
                       "flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors focus-ring",
                       set.done
                         ? "bg-approve-wash text-approve"
-                        : "text-faint hover:text-dim",
+                        : set.reps === 0
+                          ? "text-faint opacity-40"
+                          : "text-faint hover:text-dim",
                     )}
                   >
                     <Check aria-hidden className="size-[18px]" />

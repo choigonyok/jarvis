@@ -99,11 +99,13 @@ export function FinishPanel({
               <span className="min-w-0 flex-1 truncate text-ink">
                 {r.name}
               </span>
+              {/* As the log and the movement's sheet say them: a load as
+                  lifted, a 1RM in whole kilograms. */}
               <span className="tnum shrink-0 text-faint">
                 {r.kind === "무게" ? "최고 무게" : "추정 1RM"}{" "}
-                {load(Math.round(r.before * 10) / 10)} →{" "}
+                {r.kind === "무게" ? load(r.before) : Math.round(r.before)} →{" "}
                 <span className="text-approve">
-                  {load(Math.round(r.value * 10) / 10)}kg
+                  {r.kind === "무게" ? load(r.value) : Math.round(r.value)}kg
                 </span>
               </span>
             </li>

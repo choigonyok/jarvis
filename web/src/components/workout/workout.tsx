@@ -20,15 +20,18 @@ import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
 import { isoDate } from "@/lib/month";
 import { usePaged } from "@/lib/paging";
 import { SAY } from "@/lib/say";
 import { isPending } from "@/lib/thread";
+import { useNow } from "@/lib/use-gym";
 import { useThread } from "@/lib/use-thread";
 import { useWorkout } from "@/lib/use-workout";
 import {
   MUSCLE_GROUPS,
+  cellName,
   clock,
   dayLabel,
   doneSets,
@@ -49,7 +52,7 @@ import {
   type WorkoutSet,
 } from "@/lib/workout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { dayOf, monthDay } from "@/lib/when";
+import { ago, dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /** The three things the tab is opened for when nothing is running. */
@@ -76,7 +79,7 @@ export function Workout() {
   const waiting = proposals.filter(isPending);
 
   const w = useWorkout();
-  const { book, routines, live, readAt, readError, unsent } = w;
+  const { book, routines, live, elsewhere, readAt, readError, unsent } = w;
 
   const [editing, setEditing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
@@ -201,7 +204,9 @@ export function Workout() {
           {live ? (
             <LiveSession
               session={live}
-              history={book.sessions}
+              // Not a session running on another phone: those sets are not
+              // yet anybody's 지난번 or 최고 기록.
+              history={book.sessions.filter((s) => s.endedAt || s.id === live.id)}
               restTarget={book.restTarget ?? 90}
               onRestTarget={w.setRestTarget}
               onAddExercise={(name) => w.addExercise(live.id, name)}
@@ -237,6 +242,12 @@ export function Workout() {
               <ViewTabs />
 
               <TabsContent value="today">
+                  {elsewhere ? (
+                    <Elsewhere
+                      session={elsewhere}
+                      onContinue={() => w.continueHere(elsewhere.id)}
+                    />
+                  ) : null}
                   <section aria-label="루틴" className="mb-10">
                     <RoutinePicker
                       routines={routines}
@@ -290,9 +301,15 @@ export function Workout() {
                               >
                                 {"일월화수목금토"[d.getDay()]}
                               </span>
-                              <span className="max-w-full truncate px-1 text-meta leading-none text-approve">
-                                {done[0]?.routineName ??
-                                  (done.length ? "운동" : "")}
+                              {/* As the month's cells: the first part of the
+                                  name, and how many more that day. */}
+                              <span className="flex max-w-full items-baseline px-1 text-meta leading-none text-approve">
+                                {done[0] ? (
+                                  <span className="truncate">{cellName(done[0])}</span>
+                                ) : null}
+                                {done.length > 1 ? (
+                                  <span className="shrink-0 text-tiny">+{done.length - 1}</span>
+                                ) : null}
                               </span>
                             </li>
                           );
@@ -385,10 +402,12 @@ export function Workout() {
                           <SessionLog
                             key={session.id}
                             session={session}
-                            all={book.sessions}
+                            all={past}
                             onLook={setLooking}
                             onRemove={() => removeSession(session)}
                             onPatchSets={(exerciseId, fn) => w.patchSets(session.id, exerciseId, fn)}
+                            onNote={(note) => w.setNote(session.id, note)}
+                            onBodyWeight={(weight) => w.setBodyWeight(session.id, weight)}
                             onUndoable={offerUndo}
                             unsent={unsent}
                             onResend={w.reload}
@@ -402,7 +421,7 @@ export function Workout() {
               </TabsContent>
 
               <TabsContent value="lifts">
-                <Lifts sessions={book.sessions} onOpen={setLooking} />
+                <Lifts sessions={past} onOpen={setLooking} />
               </TabsContent>
             </Tabs>
           ) : null}
@@ -476,6 +495,33 @@ function ViewTabs() {
   );
 }
 
+/**
+ * A session running that this device did not start: the partner's, or this
+ * person's on another phone. Said, with the way to carry it on here - not
+ * opened as this one's own, which put the partner's sets under this thumb.
+ */
+function Elsewhere({ session, onContinue }: { session: Session; onContinue: () => void }) {
+  const now = useNow(60_000);
+  const sets = doneSets(session);
+  return (
+    <div className="mb-8 rounded-xl bg-glass px-3.5 py-3">
+      <p className="text-ui leading-relaxed text-ink">다른 기기에서 진행 중인 운동이 있어요</p>
+      <p className="tnum text-aside text-faint">
+        {session.routineName ?? "운동"} · {ago(new Date(session.startedAt), new Date(now))} 시작
+        {sets ? ` · ${sets}세트 완료` : ""}
+      </p>
+      <p className="mt-1.5 text-aside leading-relaxed text-dim">
+        아래에서 새로 시작해도 그 운동은 그대로 있어요.
+      </p>
+      <div className="-ms-3 mt-1 flex flex-wrap items-center">
+        <Button variant="quiet" size="touch-sm" onClick={onContinue}>
+          이어서 하기
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** 2세트, or 워밍업 1: a set's place among its own kind, as a running session counts it. */
 function setName(sets: WorkoutSet[], index: number): string {
   const set = sets[index];
@@ -490,6 +536,8 @@ function SessionLog({
   onLook,
   onRemove,
   onPatchSets,
+  onNote,
+  onBodyWeight,
   onUndoable,
   unsent,
   onResend,
@@ -499,6 +547,8 @@ function SessionLog({
   onLook: (name: string) => void;
   onRemove: () => void;
   onPatchSets: (exerciseId: string, fn: (sets: WorkoutSet[]) => WorkoutSet[]) => void;
+  onNote: (note: string) => void;
+  onBodyWeight: (weight: number) => void;
   onUndoable: (label: string, restore: () => void) => void;
   unsent: boolean;
   onResend: () => void;
@@ -512,6 +562,7 @@ function SessionLog({
   // rest of the time.
   const [editing, setEditing] = useState(false);
   const [picked, setPicked] = useState<SetRef | null>(null);
+  const [noting, setNoting] = useState(false);
   const pickedExercise = picked ? session.exercises.find((e) => e.id === picked.exerciseId) : undefined;
   const pickedSet = picked ? pickedExercise?.sets[picked.index] : undefined;
 
@@ -574,6 +625,16 @@ function SessionLog({
           {session.note}
         </p>
       ) : null}
+      {editing ? (
+        <button
+          type="button"
+          onClick={() => setNoting(true)}
+          aria-haspopup="dialog"
+          className="mb-3 flex min-h-11 items-center rounded-lg bg-glass px-3 text-aside text-ink transition-colors hover:bg-glass-raised focus-ring mouse:min-h-8"
+        >
+          체중·메모 고치기
+        </button>
+      ) : null}
       {records.length ? (
         <p className="mb-3 flex items-start gap-1.5 text-aside leading-relaxed text-ink">
           <TrendingUp aria-hidden className="mt-[3px] size-3.5 shrink-0 text-approve" />
@@ -594,23 +655,32 @@ function SessionLog({
             const warm = exercise.sets.filter((s) => s.done && s.warmup).length;
             return (
               <li key={exercise.id}>
-                <div className="flex items-baseline gap-3">
+                {/* Every set, onto the next line when they do not fit: cut at
+                    the edge, the last sets of a log read for them were "…",
+                    and the way to them was a name 20px tall. */}
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                   <button
                     type="button"
                     onClick={() => onLook(exercise.name)}
-                    className="shrink-0 rounded text-ui text-ink underline decoration-edge underline-offset-4 hover:decoration-dim focus-ring"
+                    className={cn(
+                      "group max-w-full rounded text-left text-ui text-ink focus-ring",
+                      // Its band would lie over the top of the sets to correct.
+                      !editing && "tap-y",
+                    )}
                   >
-                    {exercise.name}
+                    <span className="block truncate underline decoration-edge underline-offset-4 group-hover:decoration-dim">
+                      {exercise.name}
+                    </span>
                   </button>
                   {editing ? null : (
-                    <span className="tnum min-w-0 truncate text-aside text-dim">
+                    <span className="tnum text-aside text-dim">
                       {working.map((s, i) => (
-                        <span key={i} className="me-2.5">
+                        <span key={i} className="me-2.5 inline-block">
                           {setLabel(s)}
                         </span>
                       ))}
                       {warm ? (
-                        <span className="text-faint">워밍업 {warm}</span>
+                        <span className="inline-block text-faint">워밍업 {warm}</span>
                       ) : null}
                     </span>
                   )}
@@ -693,6 +763,40 @@ function SessionLog({
             </div>
           </>
         ) : null}
+      </Panel>
+
+      {/* The day's weight and memo, the two fields a running session has -
+          a 7.8 for 78 stood under the day for good. Kept as typed, as the
+          sets are; an emptied weight is no weight. */}
+      <Panel open={noting} onOpenChange={setNoting} title="체중·메모" description={dayLabel(session.date)}>
+        {unsent ? <Unsent onRetry={onResend} className="mb-3" /> : null}
+        <div className="grid gap-4">
+          <label className="block">
+            <span className="mb-1.5 block text-aside text-faint">체중</span>
+            <span className="flex items-center gap-2">
+              <Input
+                inputMode="decimal"
+                defaultValue={session.bodyWeight ? load(session.bodyWeight) : ""}
+                onChange={(e) => {
+                  const n = Number(e.target.value.trim());
+                  if (Number.isFinite(n) && n >= 0) onBodyWeight(n);
+                }}
+                placeholder="0"
+                className="tnum w-28 text-center"
+              />
+              <span className="text-aside text-faint">kg</span>
+            </span>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-aside text-faint">메모</span>
+            <Input
+              defaultValue={session.note ?? ""}
+              onChange={(e) => onNote(e.target.value)}
+              placeholder="컨디션, 통증, 바꾼 것"
+            />
+          </label>
+        </div>
+        <p className="mt-2.5 text-aside leading-relaxed text-dim">바꾸면 바로 저장돼요.</p>
       </Panel>
     </article>
   );

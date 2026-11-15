@@ -37,11 +37,38 @@ let audio: AudioContext | null = null;
  */
 export function primeChime() {
   try {
+    if (audio?.state === "closed") audio = null;
     audio ??= new AudioContext();
-    if (audio.state === "suspended") void audio.resume();
+    // Suspended, or Safari's "interrupted": what a phone leaves of a page's
+    // sound after the page has been in the background.
+    if (audio.state !== "running") void audio.resume().catch(() => {});
   } catch {
     audio = null;
   }
+}
+
+/**
+ * The chime kept ready through a session. Back from the music app or the
+ * lock screen, the sound iOS took away is asked back at once - and again at
+ * the next touch anywhere, for a phone that only gives it back to a tap. It
+ * had stayed silent until the next set was ticked, rests ending without it.
+ */
+export function useChimeReady(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const back = () => {
+      if (document.visibilityState === "visible" && audio && audio.state !== "running") {
+        void audio.resume().catch(() => {});
+      }
+    };
+    const touches = ["touchend", "click", "keydown"] as const;
+    document.addEventListener("visibilitychange", back);
+    for (const t of touches) document.addEventListener(t, primeChime, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      for (const t of touches) document.removeEventListener(t, primeChime, { capture: true });
+    };
+  }, [active]);
 }
 
 /** Two short tones and a buzz: rest is over. Silent if sound was never unlocked. */

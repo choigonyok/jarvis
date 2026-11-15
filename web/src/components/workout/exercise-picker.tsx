@@ -44,6 +44,18 @@ export function ExercisePicker({
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<MuscleGroup | null>(null);
 
+  // Afresh each time it opens: closed without a pick, the word typed and the
+  // part chosen had stayed for next time - the part's chip perhaps scrolled
+  // out of sight, narrowing a list for no reason anyone could see.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setQuery("");
+      setGroup(null);
+    }
+  }
+
   const rows = useMemo(() => {
     const recent = recentExercises(sessions);
     const known = new Set(recent.map((r) => nameKey(r.name)));
@@ -62,14 +74,19 @@ export function ExercisePicker({
     (r) => (!group || groupOf(r.name) === group) && (!q || nameKey(r.name).includes(q)),
   );
   const exact = rows.some((r) => nameKey(r.name) === q);
+  // Nothing under the part chosen: said, with the way to every part. A name
+  // that lives under another part had left the list blank - no row, no new
+  // name to add (it is not new), and Enter doing nothing.
+  const narrowed = Boolean(q && group && shown.length === 0);
   const takenSet = new Set(taken.map(nameKey));
   // The row Enter takes. Typing lights the first match again (the offer of
   // a new name sits above the matches but is not the default); the arrow
   // keys move it from there. With nothing typed nothing is lit, and Enter
   // takes nothing - as before there were keys.
   const NEW = "__new";
+  const ALL = "__all";
   const [lit, setLit] = useState("");
-  const first = q ? (shown[0]?.name ?? NEW) : "";
+  const first = q ? (shown[0]?.name ?? (narrowed ? ALL : NEW)) : "";
   const [litFor, setLitFor] = useState({ query, group });
   if (litFor.query !== query || litFor.group !== group) {
     setLitFor({ query, group });
@@ -114,6 +131,14 @@ export function ExercisePicker({
         </ToggleGroup>
 
         <CommandList className="*:space-y-px">
+          {narrowed ? (
+            <CommandItem value={ALL} onSelect={() => setGroup(null)} className="min-h-12 py-1.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body text-foreground">전체 부위에서 찾기</span>
+                <span className="block truncate text-meta text-faint">{group}에는 찾는 종목이 없어요</span>
+              </span>
+            </CommandItem>
+          ) : null}
           {q && !exact ? (
             <CommandItem value={NEW} onSelect={() => pick(query)} className="min-h-12">
               <Plus aria-hidden className="text-dim" />
