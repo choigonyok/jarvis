@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -474,7 +475,12 @@ type SitesToolInput struct {
 
 type LoginToolInput struct {
 	Site   string `json:"site" jsonschema:"로그인이 필요한 사이트 호스트. 예: web.joongna.com"`
-	Reason string `json:"reason,omitempty" jsonschema:"무엇이 막았는지 한 줄. 예: '네이버 보안문자'"`
+	Reason string `json:"reason,omitempty" jsonschema:"무엇이 막았는지 한 줄. 예: '문자 인증'"`
+}
+
+type CaptchaToolInput struct {
+	Site string `json:"site" jsonschema:"보안문자가 뜬 페이지의 호스트. 예: search.shopping.naver.com"`
+	Seen string `json:"seen,omitempty" jsonschema:"화면에 뜬 것 한 줄. 예: '네이버쇼핑 검색에 영수증 보안문자'"`
 }
 
 type ScheduleInput struct {
@@ -770,28 +776,27 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if _, bad := guard(); bad != nil {
 			return bad, nil, nil
 		}
-		site := host(in.Site)
-		if site == "" {
-			return toolText("site 가 비어 있습니다.", true), nil, nil
+		if err := m.blockSite(ctx, run, LoginInput{Site: host(in.Site), Reason: in.Reason}); err != nil {
+			return toolText(err.Error(), true), nil, nil
 		}
-		if err := m.store.SetLogin(ctx, site, true, in.Reason); err != nil {
-			return fail(err), nil, nil
-		}
-		login := LoginInput{Site: site, Reason: in.Reason}
-		raw, _ := json.Marshal(login)
-		act := action.Action{Kind: KindLogin, Input: raw}
-		if _, open := m.proposals.FindPending(act); !open {
-			p, _ := m.proposals.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: act, Card: loginCard(login)})
-			m.attach(p.ID)
-		}
-		// Due already skips jobs on a blocked site; this only makes the run
-		// count as having decided, and comes back soon after the login.
-		if _, err := m.store.Schedule(ctx, run, time.Now(), "로그인 뒤에 이어서"); err != nil {
-			return fail(err), nil, nil
-		}
-		m.current.park(run, "")
-		m.current.decide(run)
 		return ok("로그인 카드를 올렸습니다. 운영자가 로그인하고 승인하면(또는 반려하면) 작업이 곧바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "request_captcha",
+		Description: "페이지에 보안문자(그림·영수증 문제, '보안 확인을 완료해 주세요', 'I'm not a robot', 자동입력 방지)가 떠서 넘어갈 수 없을 때 부른다. " +
+			"운영자에게 화면 탭에서 풀어 달라는 카드를 올리고, 그 사이트를 쓰는 작업은 답이 올 때까지 쉰다. " +
+			"보안문자가 뜬 탭을 화면 앞에 띄워 둔 채로 부르고(닫거나 다른 주소로 옮기지 않는다), 부른 뒤에는 바로 실행을 마친다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CaptchaToolInput) (*mcp.CallToolResult, any, error) {
+		if _, bad := guard(); bad != nil {
+			return bad, nil, nil
+		}
+		if err := m.blockSite(ctx, run, LoginInput{Site: host(in.Site), Reason: in.Seen, Captcha: true}); err != nil {
+			return toolText(err.Error(), true), nil, nil
+		}
+		return ok("보안문자 카드를 올렸습니다. 보안문자 탭은 그대로 두고(닫거나 옮기지 말고) 지금 실행을 마치세요. " +
+			"운영자가 화면 탭에서 풀고 승인하면 작업이 곧바로 다시 실행됩니다 - 그때 그 페이지를 다시 열어 이어 가고, 보안문자가 또 뜨면 다시 request_captcha 를 부르세요. " +
+			"반려되면 이 사이트 없이 할 수 있는 만큼 하고 finish 로 알립니다."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -1043,6 +1048,42 @@ func pinDecided(c payCard) *mcp.CallToolResult {
 	case c.state == payRejected:
 		return toolText("운영자가 결제 비밀번호 입력을 반려했습니다. 비밀번호를 넣지 말고 finish 로 마치세요.", false)
 	}
+	return nil
+}
+
+// blockSite rests a site the run cannot get past by itself - logged out, or a
+// 보안문자 on it - until the operator answers its card, and counts the run as
+// having decided: it comes back the moment the card is answered. One card
+// per site and kind: a second run stopped at the same site, in other words,
+// does not raise another.
+func (m *Module) blockSite(ctx context.Context, run int64, in LoginInput) error {
+	if in.Site == "" {
+		return errors.New("site 가 비어 있습니다.")
+	}
+	if err := m.store.SetLogin(ctx, in.Site, true, in.Reason); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(in)
+	act := action.Action{Kind: KindLogin, Input: raw}
+	_, open := m.proposals.FindPendingWhere(func(p proposal.Proposal) bool {
+		var up LoginInput
+		return p.Action.Kind == KindLogin && json.Unmarshal(p.Action.Input, &up) == nil && up.Site == in.Site && up.Captcha == in.Captcha
+	})
+	if !open {
+		p, _ := m.proposals.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: act, Card: loginCard(in)})
+		m.attach(p.ID)
+	}
+	// Due already skips jobs on a blocked site; this only makes the run
+	// count as having decided, and comes back soon after the card.
+	next := "로그인 뒤에 이어서"
+	if in.Captcha {
+		next = "보안문자를 푼 뒤에 이어서"
+	}
+	if _, err := m.store.Schedule(ctx, run, time.Now(), next); err != nil {
+		return err
+	}
+	m.current.park(run, "")
+	m.current.decide(run)
 	return nil
 }
 

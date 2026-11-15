@@ -314,9 +314,13 @@ func jobChoices(in []ChoiceInput) []action.Choice {
 	return out
 }
 
+// LoginInput is a site a job cannot get past by itself: logged out, or - with
+// Captcha - a 보안문자 the page put up. Either way the operator clears it on
+// the 화면 tab, and the site's jobs rest until the card is answered.
 type LoginInput struct {
-	Site   string `json:"site"`
-	Reason string `json:"reason,omitempty"`
+	Site    string `json:"site"`
+	Reason  string `json:"reason,omitempty"`
+	Captcha bool   `json:"captcha,omitempty"`
 }
 
 // SitesInput is a job's request for more sites.
@@ -358,7 +362,25 @@ func askCard(in AskInput) action.Card {
 	}
 }
 
+// captchaIdle is how long the shared browser stays up with nothing using it
+// (browser-use closes a session idle for ten minutes): the 보안문자 a run left
+// on screen is there that long, and the card says what to do after.
+const captchaIdle = "10분"
+
 func loginCard(in LoginInput) action.Card {
+	if in.Captcha {
+		body := "화면 탭에서 브라우저에 떠 있는 보안문자를 풀고 승인을 누르세요. " +
+			"브라우저는 " + captchaIdle + " 동안 아무도 쓰지 않으면 닫히니, 화면에 보안문자가 없으면 그냥 승인하세요 - 작업이 그 페이지를 다시 열어 보고, 또 막히면 다시 요청합니다."
+		if in.Reason != "" {
+			body = in.Reason + "\n\n" + body
+		}
+		return action.Card{
+			Title:       "보안문자를 풀어 주세요: " + in.Site,
+			Body:        body,
+			Facts:       []action.Fact{{Label: "보안문자가 뜬 사이트", Value: in.Site}},
+			Consequence: "승인하면 이 사이트를 쓰는 작업을 바로 이어서 합니다. 반려하면 작업이 이 사이트 없이 할 수 있는 만큼만 하고 알려 드립니다.",
+		}
+	}
 	body := "화면 탭에서 브라우저로 로그인한 뒤 승인을 누르세요."
 	if in.Reason != "" {
 		body = in.Reason + "\n\n" + body
@@ -520,8 +542,13 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 				m.proposals.Settle(p.ID, proposal.Failed, err.Error())
 				return
 			}
-			n := m.tellSite(ctx, in.Site, p.ID, "[로그인 반려] "+in.Site+": 운영자가 로그인 요청을 반려했습니다. "+
-				"로그인 없이 할 수 있는 일만 하고, 로그인이 꼭 필요하면 다시 요청하지 말고 그렇게 finish 로 알리고 끝내세요.")
+			told := "[로그인 반려] " + in.Site + ": 운영자가 로그인 요청을 반려했습니다. " +
+				"로그인 없이 할 수 있는 일만 하고, 로그인이 꼭 필요하면 다시 요청하지 말고 그렇게 finish 로 알리고 끝내세요."
+			if in.Captcha {
+				told = "[보안문자 반려] " + in.Site + ": 운영자가 보안문자를 풀지 않기로 했습니다. " +
+					"이 사이트 없이 할 수 있는 일만 하고, 이 사이트가 꼭 필요하면 다시 요청하지 말고 그렇게 finish 로 알리고 끝내세요."
+			}
+			n := m.tellSite(ctx, in.Site, p.ID, told)
 			m.proposals.Settle(p.ID, proposal.Rejected, fmt.Sprintf("이 사이트를 쓰는 작업 %d개에 반려로 전했습니다.", n))
 			m.wake()
 			return
