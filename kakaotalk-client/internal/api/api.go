@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -65,7 +66,12 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	since := int64(intQuery(r, "since", 0))
 	limit := intQuery(r, "limit", 100)
-	msgs, err := s.store.ChatMessages(chatID, since, limit)
+	// before pages back: the message_id of the oldest message the caller holds.
+	msgs, err := s.store.ChatMessages(chatID, since, r.URL.Query().Get("before"), limit)
+	if errors.Is(err, store.ErrNoMessage) {
+		writeErr(w, http.StatusNotFound, "before: no such message in this chat")
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

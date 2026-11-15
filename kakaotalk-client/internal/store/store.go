@@ -4,11 +4,16 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/kakao"
 	_ "modernc.org/sqlite"
 )
+
+// ErrNoMessage is a before= that names no message of the chat: there is no
+// place in it to read back from.
+var ErrNoMessage = errors.New("no such message in this chat")
 
 type Store struct {
 	db *sql.DB
@@ -166,12 +171,36 @@ func (s *Store) RecentMessages(limit int) ([]kakao.Message, error) {
 }
 
 // ChatMessages returns messages for one chat with sent_at >= since (epoch),
-// most recent first, capped at limit.
-func (s *Store) ChatMessages(chatID int64, since int64, limit int) ([]kakao.Message, error) {
+// most recent first, capped at limit. before, when given, is the message_id
+// of one of the chat's messages - the oldest a reader holds - and the page is
+// then the messages past it in that order: the older ones.
+//
+// sent_at is in whole seconds and a burst of messages shares one, so the
+// order goes on to the source rowid and then message_id, and every message
+// has a place of its own: a page cut inside a second neither repeats nor
+// skips any of it on the next. The cursor is message_id, not a time: it is
+// the key the store and the console both know a message by, and the store
+// finds its place from it.
+func (s *Store) ChatMessages(chatID int64, since int64, before string, limit int) ([]kakao.Message, error) {
+	where, args := `chat_id=? AND sent_at>=?`, []any{chatID, since}
+	if before != "" {
+		var at, rowid int64
+		err := s.db.QueryRow(`SELECT sent_at, rowid_src FROM messages WHERE chat_id=? AND message_id=?`,
+			chatID, before).Scan(&at, &rowid)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoMessage
+		}
+		if err != nil {
+			return nil, err
+		}
+		// sent_at<=? starts the (chat_id, sent_at) index at the cursor's second.
+		where += ` AND sent_at<=? AND (sent_at, rowid_src, message_id) < (?,?,?)`
+		args = append(args, at, at, rowid, before)
+	}
 	rows, err := s.db.Query(`
 		SELECT message_id, rowid_src, chat_id, chat_name, chat_type, author_id, author, is_mine, type, text, sent_at
-		FROM messages WHERE chat_id=? AND sent_at>=? ORDER BY sent_at DESC LIMIT ?`,
-		chatID, since, limit)
+		FROM messages WHERE `+where+` ORDER BY sent_at DESC, rowid_src DESC, message_id DESC LIMIT ?`,
+		append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}

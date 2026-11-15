@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -68,7 +69,12 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chat query param (chat_id) required"})
 			return
 		}
-		msgs, err := s.store.ChatMessages(chatID, intQuery(r, "limit", 100))
+		// before pages back: the message_id of the oldest message the caller holds.
+		msgs, err := s.store.ChatMessages(chatID, r.URL.Query().Get("before"), intQuery(r, "limit", 100))
+		if errors.Is(err, store.ErrNoMessage) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "before: no such message in this chat"})
+			return
+		}
 		reply(w, map[string]any{"messages": msgs}, err)
 	}))
 	mux.HandleFunc("/messages/recent", s.auth(func(w http.ResponseWriter, r *http.Request) {

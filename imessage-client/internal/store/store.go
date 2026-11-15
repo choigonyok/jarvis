@@ -5,6 +5,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 
 	_ "modernc.org/sqlite"
 
@@ -114,11 +115,36 @@ func scan(rows *sql.Rows) ([]imsg.Message, error) {
 	return out, rows.Err()
 }
 
+// ErrNoMessage is a before= that names no message of the chat: there is no
+// place in it to read back from.
+var ErrNoMessage = errors.New("no such message in this chat")
+
 // ChatMessages is the latest `limit` messages of one chat, newest first -
 // the order the KakaoTalk collector uses, so the console treats both alike.
-func (s *Store) ChatMessages(chatID int64, limit int) ([]imsg.Message, error) {
-	rows, err := s.db.Query(`SELECT `+cols+` FROM messages WHERE chat_id = ?
-		ORDER BY sent_at DESC, rowid_src DESC LIMIT ?`, chatID, limit)
+// before, when given, is the message_id of one of the chat's messages (the
+// oldest a reader holds), and the page is then the `limit` older than it, in
+// the same order and with the same cursor as the KakaoTalk collector's. The
+// order runs on from sent_at, in whole seconds that several messages share,
+// to rowid_src, one per message, so a page cut inside a second neither
+// repeats nor skips any of it.
+func (s *Store) ChatMessages(chatID int64, before string, limit int) ([]imsg.Message, error) {
+	where, args := `chat_id = ?`, []any{chatID}
+	if before != "" {
+		var at, rowid int64
+		err := s.db.QueryRow(`SELECT sent_at, rowid_src FROM messages WHERE chat_id = ? AND message_id = ?`,
+			chatID, before).Scan(&at, &rowid)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoMessage
+		}
+		if err != nil {
+			return nil, err
+		}
+		// sent_at <= ? starts the (chat_id, sent_at) index at the cursor's second.
+		where += ` AND sent_at <= ? AND (sent_at, rowid_src) < (?, ?)`
+		args = append(args, at, at, rowid)
+	}
+	rows, err := s.db.Query(`SELECT `+cols+` FROM messages WHERE `+where+`
+		ORDER BY sent_at DESC, rowid_src DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}

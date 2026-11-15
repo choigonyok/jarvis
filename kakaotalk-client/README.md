@@ -50,7 +50,7 @@ All routes are GET and read-only. Send `Authorization: Bearer <API_TOKEN>`.
 | `GET /health` | Liveness (no auth). |
 | `GET /status` | Poller status: cursor, totals, last latency, last error. |
 | `GET /chats?limit=` | Rooms, most recent first. |
-| `GET /messages?chat=<id>&since=<epoch>&limit=` | Messages in one room. |
+| `GET /messages?chat=<id>&since=<epoch>&before=<message_id>&limit=` | Messages in one room, newest first (by second, then source `ROWID`). `before` reads further back: the messages older than that one, in the same order (404 if the room has no such message). |
 | `GET /messages/recent?limit=` | Newest messages across all rooms. |
 | `GET /search?q=&limit=` | Substring search over stored text. |
 
