@@ -437,16 +437,23 @@ func (w *Watch) hostFalkorAOF() row {
 // (kakaotalk-client/cmd/relogin, ~/.jarvis-host/kakaotalk-login.json beside
 // host.json). It writes on every look, every few seconds.
 type kakaoLoginFacts struct {
-	CheckedAt  time.Time  `json:"checkedAt"`
-	State      string     `json:"state"`
-	Detail     string     `json:"detail"`
-	Fails      int        `json:"fails"`
-	ReloggedAt *time.Time `json:"reloggedAt"`
+	CheckedAt   time.Time  `json:"checkedAt"`
+	State       string     `json:"state"`
+	Detail      string     `json:"detail"`
+	Fails       int        `json:"fails"`
+	ReloggedAt  *time.Time `json:"reloggedAt"`
+	DownSince   *time.Time `json:"downSince"`
+	RestartedAt *time.Time `json:"restartedAt"`
 }
+
+// chatDownFail is how long a logged-in KakaoTalk may be off its chat server
+// before it is a fault: the program wakes the display after 3 minutes and
+// restarts KakaoTalk after 5, so half an hour is those not having worked.
+const chatDownFail = 30 * time.Minute
 
 func (w *Watch) kakaoLogin() row {
 	return row{id: "kakao.login", group: "수집", name: "카톡 로그인",
-		rule: "맥미니 카톡이 로그인돼 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 5초 안에 알아보고 인터넷이 돌아오는 대로 다시 로그인해요. 인터넷을 기다리거나 다시 시도하는 중이면 주의, 비밀번호가 맞지 않거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
+		rule: "맥미니 카톡이 로그인돼 있고 채팅 서버에 붙어 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 5초 안에 알아보고 인터넷이 돌아오는 대로 다시 로그인해요. 로그인돼 있는데 채팅 서버 연결이 끊기면(메시지가 들어오지 않아요) 1분 안에 알아보고, 3분 넘으면 꺼진 화면을 깨우고 그래도 안 붙으면 카톡을 다시 켜요. 인터넷을 기다리거나 다시 시도·다시 연결하는 중이면 주의, 연결이 30분 넘게 끊겨 있거나 비밀번호가 맞지 않거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
 		fix:  "scripts/kakaotalk-relogin status 로 상태와 로그를 보세요. 권한이 없으면 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 'Jarvis 카톡 자동 로그인'을 켜고, 비밀번호가 없거나 틀렸으면 scripts/kakaotalk-relogin password. 휴대폰 확인으로 멈췄으면 맥미니에서 직접 로그인하면 다시 지켜봐요.",
 		run:  func(context.Context) checks.Result { return w.judgeLogin() }}
 }
@@ -464,6 +471,9 @@ func (w *Watch) judgeLogin() checks.Result {
 	v := checks.Result{ObservedAt: &at, ObservedLabel: "맥미니에서 확인"}
 	if k.ReloggedAt != nil && time.Since(*k.ReloggedAt) < 24*time.Hour {
 		v.Facts = append(v.Facts, fmt.Sprintf("%s 에 로그아웃돼 있던 것을 저절로 다시 로그인했어요", k.ReloggedAt.Local().Format("01-02 15:04")))
+	}
+	if k.RestartedAt != nil && time.Since(*k.RestartedAt) < 24*time.Hour {
+		v.Facts = append(v.Facts, fmt.Sprintf("%s 에 채팅 서버 연결이 끊겨 카톡을 다시 켰어요", k.RestartedAt.Local().Format("01-02 15:04")))
 	}
 	if k.Detail != "" {
 		v.Facts = append(v.Facts, k.Detail)
@@ -500,6 +510,15 @@ func (w *Watch) judgeLogin() checks.Result {
 		v.State, v.Summary = checks.Warn, "카톡 창을 읽지 못해요. 로그아웃되면 저절로 다시 로그인하지 못할 수 있어요."
 	case "unreadable-out":
 		v.State, v.Summary = checks.Fail, "카톡이 로그아웃됐는데 창을 읽지 못해 다시 로그인하지 못해요. 맥미니 화면을 한 번 깨워 주세요."
+	case "disconnected":
+		// Logged in, but off the chat server: no message comes in. The program
+		// wakes the display and restarts KakaoTalk; past chatDownFail those
+		// have not worked.
+		if k.DownSince != nil && time.Since(*k.DownSince) > chatDownFail {
+			v.State, v.Summary = checks.Fail, fmt.Sprintf("카톡이 로그인돼 있지만 채팅 서버와 %s 부터 연결이 끊겨 메시지가 들어오지 않아요. 맥미니에서 카톡을 확인해 주세요.", k.DownSince.Local().Format("01-02 15:04"))
+		} else {
+			v.State, v.Summary = checks.Warn, "카톡이 로그인돼 있지만 채팅 서버 연결이 끊겨 있어요. 다시 붙이는 중이에요."
+		}
 	case "no-access":
 		v.State, v.Summary = checks.Fail, "자동 로그인 프로그램에 손쉬운 사용 권한이 없어요."
 	case "no-password":

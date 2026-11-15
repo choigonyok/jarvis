@@ -122,6 +122,22 @@ record says `locked` (the 상태 tab fails and pushes) and the display
 is not woken again until the screen has been seen open; logged in behind such
 a lock, `locked-in` warns.
 
+**Logged in is not yet receiving.** A message reaches the database only while
+KakaoTalk's chat connection (LOCO, ports 5228·5223·995·9282) is up, and a
+network drop can leave it logged in with that connection gone: the server
+closes its side, KakaoTalk never notices (CLOSE_WAIT) and does not dial again
+while the display sleeps. 2026-11-13 19:18 a drop changed the Mac mini's
+address; the menu said 로그아웃, the chat list was on screen, and nothing came
+in until the display was woken 11-15 11:17 - KakaoTalk dialed within a second
+and fetched the 1,458 it had missed. So while KakaoTalk is logged in the
+program reads its connections once a minute with `nettop` (lsof does not show
+them - they run in user space through Network.framework). No chat connection
+established for 3 minutes with the internet up: the record says
+`disconnected`, the display is woken (behind a lock that wants no password),
+and if it is still down 2 minutes later KakaoTalk is quit (SIGTERM) and opened
+again - at most once in 30 minutes (`restartedAt`). The 상태 tab warns while
+that is in hand and fails past 30 minutes down (`downSince`).
+
 ```bash
 scripts/kakaotalk-relogin install    # from the MacBook: build, wrap as an app, sign, LaunchAgent on the Mac mini
 scripts/kakaotalk-relogin password   # type the Kakao account and password here; it goes to the Mac mini's keychain

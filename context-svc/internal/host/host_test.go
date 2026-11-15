@@ -168,6 +168,32 @@ func TestKakaoLoginLockedScreen(t *testing.T) {
 	}
 }
 
+// Logged in but off the chat server: a reconnect in hand is a warning, half
+// an hour of it - the wake and the restart not having worked - a fault, and a
+// restart of the last day is said.
+func TestKakaoChatDisconnected(t *testing.T) {
+	dir := t.TempDir()
+	e := &Watch{File: filepath.Join(dir, "host.json")}
+	now := time.Now()
+	write := func(downAgo time.Duration) {
+		t.Helper()
+		body := `{"checkedAt":"` + now.Format(time.RFC3339) + `","state":"disconnected","detail":"채팅 서버 연결이 끊겨 카톡을 다시 켰어요",` +
+			`"downSince":"` + now.Add(-downAgo).Format(time.RFC3339) + `","restartedAt":"` + now.Add(-time.Minute).Format(time.RFC3339) + `"}`
+		if err := os.WriteFile(filepath.Join(dir, "kakaotalk-login.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(5 * time.Minute)
+	v := e.judgeLogin()
+	if v.State != checks.Warn || len(v.Facts) != 2 || !strings.Contains(v.Facts[0], "다시 켰어요") {
+		t.Fatalf("다시 붙이는 중이면 주의, 다시 켠 것을 말해야 합니다: %+v", v)
+	}
+	write(45 * time.Minute)
+	if v := e.judgeLogin(); v.State != checks.Fail || !strings.Contains(v.Summary, "메시지가 들어오지 않아요") {
+		t.Fatalf("30분 넘게 끊겨 있으면 이상: %+v", v)
+	}
+}
+
 // The phone's last report: nothing yet is not a fault, a long silence is.
 func TestThePhoneReporting(t *testing.T) {
 	var at *time.Time

@@ -16,7 +16,9 @@
 // hides every window, so a logout behind it goes unseen, and it counts as
 // locked whenever the display sleeps; with no password on the lock, a logout
 // wakes the display, which unlocks it. A lock that keeps a password is said,
-// not opened. What it sees and did goes to ~/.jarvis-host/kakaotalk-login.json,
+// not opened. Logged in, its chat connection is looked at too (link.go): off
+// the chat server past a few minutes, the display is woken and then KakaoTalk
+// restarted. What it sees and did goes to ~/.jarvis-host/kakaotalk-login.json,
 // which the 상태 tab reads.
 //
 // It runs as the LaunchAgent com.jarvis.kakaotalk-relogin
@@ -50,7 +52,7 @@ type status struct {
 	// logged-in | no-window | relogged | notice | starting | offline | waiting |
 	// failed | wrong-password | needs-person | no-access | no-password |
 	// waking | locked | locked-in | locked-unknown | unreadable | unreadable-out |
-	// unknown
+	// disconnected | unknown
 	State      string     `json:"state"`
 	Detail     string     `json:"detail,omitempty"`
 	Access     bool       `json:"access"`
@@ -60,6 +62,11 @@ type status struct {
 	LastTry    *time.Time `json:"lastTry,omitempty"`
 	LastResult string     `json:"lastResult,omitempty"`
 	ReloggedAt *time.Time `json:"reloggedAt,omitempty"`
+	// DownSince is when a logged-in KakaoTalk's chat connection was first
+	// seen down (disconnected only); RestartedAt is when it was last quit and
+	// opened again for that (link.go).
+	DownSince   *time.Time `json:"downSince,omitempty"`
+	RestartedAt *time.Time `json:"restartedAt,omitempty"`
 }
 
 type daemon struct {
@@ -85,6 +92,14 @@ type daemon struct {
 	// Whether the lock asks for a password, and when that was last asked.
 	lockPassword bool
 	lockAskedAt  time.Time
+	// The chat connection of a logged-in KakaoTalk (link.go): what is known
+	// of it, when and for which process it was last read, what that came to,
+	// and whether nettop could not read it (said once).
+	link      link
+	linkAt    time.Time
+	linkPid   int
+	linkSaid  string
+	linkBlind bool
 }
 
 func main() {
@@ -131,6 +146,9 @@ func (d *daemon) run() {
 
 func (d *daemon) set(state, detail string) {
 	d.st.State, d.st.Detail = state, detail
+	if state != "disconnected" {
+		d.st.DownSince = nil
+	}
 	d.st.Fails = d.pol.Fails
 	d.st.NextTry = nil
 	if !d.pol.Next.IsZero() && !d.pol.GaveUp {
@@ -172,7 +190,14 @@ func (d *daemon) tick() time.Duration {
 	// where the windows take seconds, and it says so while the screen is
 	// locked, when the windows say nothing at all.
 	menu := readMenu(pid)
-	if screenLocked() {
+	locked := screenLocked()
+	// Logged in is not yet receiving: the chat connection is looked at too.
+	if menu == menuIn {
+		if wait, held := d.watchLink(pid, locked); held {
+			return wait
+		}
+	}
+	if locked {
 		return d.locked(menu)
 	}
 	d.wakeUseless = false
@@ -324,6 +349,77 @@ func (d *daemon) in() {
 	d.wasOut = false
 	d.pol.reset()
 	d.set("logged-in", "")
+}
+
+// watchLink looks at a logged-in KakaoTalk's chat connection once in
+// linkEvery (link.go) and, while it is down, holds the look there: says
+// disconnected, wakes the display, or quits KakaoTalk so the next look opens
+// it again. held is false while the connection is up, or cannot be read -
+// the look goes on as before.
+func (d *daemon) watchLink(pid int, locked bool) (wait time.Duration, held bool) {
+	now := time.Now()
+	if pid != d.linkPid || now.Sub(d.linkAt) >= linkEvery {
+		d.linkPid, d.linkAt = pid, now
+		up, err := readLink(pid)
+		if err != nil {
+			if !d.linkBlind {
+				log.Printf("카톡의 채팅 연결을 읽지 못했습니다 - 연결은 보지 않고 로그인만 봅니다: %v", err)
+				d.linkBlind = true
+			}
+			d.link.downSince, d.link.wokeAt, d.linkSaid = time.Time{}, time.Time{}, ""
+			return 0, false
+		}
+		d.linkBlind = false
+		was := d.linkSaid
+		d.linkSaid = d.link.next(up, up || online(), locked, !d.lockNeedsPassword(), now)
+		switch d.linkSaid {
+		case "up":
+			if was != "" && was != "up" {
+				log.Printf("카톡이 채팅 서버에 다시 붙었어요")
+			}
+		case "down":
+			if was == "" || was == "up" {
+				log.Printf("카톡이 로그인돼 있는데 채팅 서버 연결이 없어요 - %s 기다려 봅니다", linkGrace)
+			}
+		case "wake":
+			log.Printf("카톡 채팅 서버 연결이 %s째 끊겨 있어 꺼진 화면을 깨웁니다", now.Sub(d.link.downSince).Round(time.Minute))
+			wakeDisplay()
+		case "restart":
+			log.Printf("카톡 채팅 서버 연결이 끊겨 있어 카톡을 다시 켭니다")
+			if locked && !d.lockNeedsPassword() {
+				wakeDisplay()
+			}
+			if err := restartKakao(pid); err != nil {
+				log.Printf("카톡을 다시 켜지 못했습니다: %v", err)
+			} else {
+				d.st.RestartedAt = &now
+			}
+		case "held":
+			if was != "held" {
+				log.Printf("카톡을 다시 켰는데도 채팅 서버 연결이 끊겨 있어요 - %s마다 다시 켭니다", restartEvery)
+			}
+		}
+	}
+	if d.linkSaid == "" || d.linkSaid == "up" || d.inspectWanted() {
+		return 0, false
+	}
+	detail := map[string]string{
+		"offline": "카톡이 로그인돼 있지만 채팅 서버 연결이 끊겨 있어요 - 인터넷이 돌아오기를 기다려요",
+		"down":    "카톡이 로그인돼 있지만 채팅 서버 연결이 끊겨 있어요 - 다시 붙기를 기다려요",
+		"wake":    "채팅 서버 연결이 끊겨 꺼진 화면을 깨웠어요 - 다시 붙기를 기다려요",
+		"waking":  "채팅 서버 연결이 끊겨 꺼진 화면을 깨웠어요 - 다시 붙기를 기다려요",
+		"restart": "채팅 서버 연결이 끊겨 카톡을 다시 켰어요",
+		"held":    fmt.Sprintf("카톡을 다시 켰는데도 채팅 서버 연결이 끊겨 있어요 - %s마다 다시 켜요", restartEvery),
+	}[d.linkSaid]
+	d.set("disconnected", detail)
+	if since := d.link.downSince; !since.IsZero() {
+		d.st.DownSince = &since
+	}
+	if d.linkSaid == "restart" {
+		// The next look finds KakaoTalk gone and opens it.
+		return 2 * time.Second, true
+	}
+	return poll, true
 }
 
 // locked is a look while the Mac's screen is locked. Every window is hidden
