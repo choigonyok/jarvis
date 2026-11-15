@@ -8,10 +8,11 @@ import { CardAnswers, CardFacts } from "@/components/chat/card-answers";
 import { Sending, Sent } from "@/components/chat/hold";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
 import { sentChoice, useDecision } from "@/lib/decide";
-import { outcomeCopy, summarize } from "@/lib/ledger";
+import { outcomeCopy, raisedAt, summarize } from "@/lib/ledger";
 import { asksYesNo, chosenOf, outcomeOf } from "@/lib/outcome";
 import type { CardChoice, Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
+import { clock, dateTime } from "@/lib/when";
 
 /**
  * One request, as one line.
@@ -59,7 +60,14 @@ export function Entry({
   const fields = Boolean(proposal.card.fields?.length);
   const photos = Boolean(proposal.card.images?.length);
   const literal = isLiteral(proposal);
-  const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
+  // When it was raised, under the day it was raised: the day above the row
+  // and its place in the day come from that moment too (lib/ledger.ts). The
+  // time it was decided stood here, and a card decided days later read as
+  // that time on the day it came, the day's rows out of order.
+  const time = when ?? clock(raisedAt(proposal)?.toISOString(), proposal.at);
+  // How it ended, when: the agent stamps a decision with the time of day
+  // alone, and the whole moment only as the card's last change.
+  const ended = waiting ? "" : proposal.changedAt ? dateTime(proposal.changedAt) : (proposal.decidedAt ?? "");
   // The words and the facts apart, as on the chat's card.
   const facts = proposal.card.facts ?? [];
   const apart = facts.length > 0 || Boolean(proposal.card.writer);
@@ -139,6 +147,11 @@ export function Entry({
             <p className="mt-2 text-aside leading-normal text-dim">{readableConsequence(proposal.card.consequence)}</p>
           ) : null}
 
+          {ended ? (
+            <p className="mt-2 text-meta text-faint">
+              {copy.label} · <span className="tnum">{ended}</span>
+            </p>
+          ) : null}
           {proposal.note ? (
             <p className="mt-1.5 text-meta text-faint">{proposal.note}</p>
           ) : null}
@@ -146,11 +159,15 @@ export function Entry({
 
           {waiting ? (
             <div className="mt-3">
-              {decision.busy ? (
-                <Sending />
-              ) : decision.sent ? (
-                <Sent decision={decision.sent} yesNo={asksYesNo(proposal)} label={sentChoice(proposal.id)} />
-              ) : fields || photos ? (
+              {/* Heard as it comes, as on the conversation's card. */}
+              <div aria-live="polite">
+                {decision.busy ? (
+                  <Sending />
+                ) : decision.sent ? (
+                  <Sent decision={decision.sent} yesNo={asksYesNo(proposal)} label={sentChoice(proposal.id)} />
+                ) : null}
+              </div>
+              {decision.busy || decision.sent ? null : fields || photos ? (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <p className="px-1 text-aside leading-normal text-dim">
                     {fields && photos ? "적을 칸과 사진" : fields ? "적을 칸" : "사진"}이 있는 카드라 대화에서 결재해요.

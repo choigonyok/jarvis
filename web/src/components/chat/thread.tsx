@@ -23,8 +23,10 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import type { Job } from "@/lib/jobs";
+import { readableTitle } from "@/lib/card-body";
 import { keepValue, useKept } from "@/lib/keep";
-import { isPending, type Turn, type TurnRef } from "@/lib/thread";
+import { asksQuestion } from "@/lib/outcome";
+import { isPending, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
 import { diag } from "@/lib/diag";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { openedTurns, useThread } from "@/lib/use-thread";
@@ -38,10 +40,16 @@ const MODE_KEY = "jarvis:chat-mode";
 
 /**
  * An agent turn as it is read aloud: a job's card is announced as the job's,
- * a notice as what it is, a checklist by its name.
+ * a notice as what it is, a checklist by its name - and a card it raised is
+ * said to be waiting. The voice stage draws no cards: a turn that was only a
+ * card went by in silence, and the stage went back to 편하게 말해 보세요.
  */
-function spokenText(turn: Turn): string {
-  const body = speakable(turn.paragraphs?.join("\n\n") ?? "");
+function spokenText(turn: Turn, card?: Proposal): string {
+  const words = speakable(turn.paragraphs?.join("\n\n") ?? "");
+  const body =
+    card && isPending(card)
+      ? `${words} '${readableTitle(card.card.title)}' 카드를 올렸어요. 화면에서 ${asksQuestion(card) ? "답해" : "결재해"} 주세요.`.trim()
+      : words;
   const o = turn.origin;
   if (!o) return body;
   const name = o.title ? `'${o.title}'` : "";
@@ -179,6 +187,12 @@ export function Thread() {
   // The chosen mode should survive a reload; reading it in an effect keeps the
   // server render and the first client render identical.
   useEffect(() => {
+    // A tapped push about a card opens on the card, in the conversation - the
+    // stage draws none - and the conversation is then the mode last left in.
+    if (new URLSearchParams(window.location.search).has("proposal")) {
+      window.localStorage.setItem(MODE_KEY, "text");
+      return;
+    }
     const saved = window.localStorage.getItem(MODE_KEY);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved === "voice" || saved === "text") setMode(saved);
@@ -187,7 +201,7 @@ export function Thread() {
   const last = turns.at(-1);
   // What the newest agent line says when read aloud: a job's news is
   // introduced as the job's, so it is not mistaken for Jarvis answering.
-  const text = last?.role === "agent" ? spokenText(last) : "";
+  const text = last?.role === "agent" ? spokenText(last, last.proposalId ? byId.get(last.proposalId) : undefined) : "";
 
   useEffect(() => {
     if (mode !== "voice") {
@@ -218,6 +232,29 @@ export function Thread() {
     setMode(next);
     window.localStorage.setItem(MODE_KEY, next);
   }, []);
+
+  // The card the voice stage left for - its 결재 대기 line, or a push about a
+  // card tapped while it was up - brought into view once the conversation is
+  // drawn again: a frame later, as a push's card is, after the scroller has
+  // landed on the newest turn.
+  const cardAfterVoice = useRef<string | null>(null);
+  const leaveVoiceForCard = useCallback(
+    (id: string) => {
+      cardAfterVoice.current = id;
+      switchMode("text");
+    },
+    [switchMode],
+  );
+  const goToCard = scroll.goToCard;
+  useEffect(() => {
+    if (mode !== "text" || !cardAfterVoice.current) return;
+    const frame = requestAnimationFrame(() => {
+      const id = cardAfterVoice.current;
+      cardAfterVoice.current = null;
+      if (id) goToCard(id);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode, goToCard]);
 
   // What the header and the composer are handed stays the same while it means
   // the same: they are drawn again only when it changes, not on every frame of
@@ -289,6 +326,8 @@ export function Thread() {
         muted={muted}
         onMutedChange={setMuted}
         onExit={() => switchMode("text")}
+        waiting={waiting}
+        onCard={leaveVoiceForCard}
         lastSaid={text || undefined}
         thinking={thinking}
         voice={voice}

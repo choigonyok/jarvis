@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { ACTION } from "@/lib/kinds";
 import type { Decision, Proposal } from "@/lib/thread";
@@ -27,18 +27,27 @@ export function holdsMoney(p: Proposal): boolean {
  */
 const letGo = new Set<string>();
 
+/** How the last hold on a card ended with nothing sent: by leaving the screen, or by 되돌리기. */
+export type Unsent = "left" | "undone";
+
+/**
+ * How soon after a hold begins 되돌리기 is not taken. It stands where 승인 was,
+ * so the second tap of a double tap on 승인 - or one more, the press felt
+ * slow - landed on it, and the approval was let go with nothing said.
+ */
+const UNDO_AFTER_MS = 500;
+
 /**
  * An approval held for HOLD_MS before it is sent. 되돌리기 lets go of it and
  * nothing was sent. Leaving the screen, or the phone putting the page away,
  * lets go of it too: a payment is not sent in the moment nobody is looking -
  * a held approval sent on the way out was the commonest way the wait came to
- * nothing. The card then says it was held back
- * (interrupted), and 다시 승인 holds it again.
+ * nothing. The card then says which (unsent), and 다시 승인 holds it again.
  */
 export function useHold(id: string, send: () => void) {
   const [until, setUntil] = useState<number | null>(null);
   const [now, setNow] = useState(0);
-  const [interrupted, setInterrupted] = useState(() => letGo.has(id));
+  const [unsent, setUnsent] = useState<Unsent | null>(() => (letGo.has(id) ? "left" : null));
   const latest = useRef(send);
   useEffect(() => {
     latest.current = send;
@@ -59,7 +68,7 @@ export function useHold(id: string, send: () => void) {
     armed.current = false;
     letGo.add(id);
     setUntil(null);
-    setInterrupted(true);
+    setUnsent("left");
   }, [id]);
 
   useEffect(() => {
@@ -87,22 +96,25 @@ export function useHold(id: string, send: () => void) {
 
   return {
     holding: until !== null,
-    /** The last hold was let go by leaving: nothing was sent. */
-    interrupted,
+    /** How the last hold ended with nothing sent, if it did. */
+    unsent,
     left: until === null ? 0 : Math.max(1, Math.ceil((until - now) / 1000)),
     start: () => {
       armed.current = true;
       letGo.delete(id);
-      setInterrupted(false);
+      setUnsent(null);
       const t = Date.now();
       setNow(t);
       setUntil(t + HOLD_MS);
     },
+    /** Lets go of the hold - false when too soon after it began to be meant. */
     cancel: () => {
+      if (until !== null && Date.now() - (until - HOLD_MS) < UNDO_AFTER_MS) return false;
       armed.current = false;
       letGo.delete(id);
-      setInterrupted(false);
+      setUnsent("undone");
       setUntil(null);
+      return true;
     },
   };
 }
@@ -155,11 +167,15 @@ export function Sent({
   );
 }
 
-/** What a card says of a hold let go by leaving: nothing was sent, and it can be asked again. */
-export function HeldBack({ className }: { className?: string }) {
+/**
+ * What a card says of a hold let go: nothing was sent, and it can be asked
+ * again. 되돌리기 says so too - the buttons coming back alone read, after a
+ * stray tap, as a payment on its way.
+ */
+export function HeldBack({ by, className }: { by: Unsent; className?: string }) {
   return (
-    <p role="status" className={cn("mb-2 px-0.5 text-aside text-dim", className)}>
-      승인이 보류됐어요. 화면을 떠나서 결제를 보내지 않았어요.
+    <p className={cn("mb-2 px-0.5 text-aside text-dim", className)}>
+      {by === "left" ? "승인이 보류됐어요. 화면을 떠나서 결제를 보내지 않았어요." : "되돌렸어요. 결제를 보내지 않았어요."}
     </p>
   );
 }
@@ -168,16 +184,23 @@ export function HeldBack({ className }: { className?: string }) {
  * Where 반려 and 승인 were: what is about to happen, and the way out of it -
  * a button that empties as the seconds go. No green yet: nothing has been
  * decided until it is sent.
+ *
+ * The seconds going down are for the eye. Read out, the whole sentence was
+ * said again every second, over the way to 되돌리기; a screen reader hears it
+ * once, with the full five, and again on 되돌리기 itself.
  */
 export function HoldBar({ left, onCancel, className }: { left: number; onCancel: () => void; className?: string }) {
+  const said = useId();
   return (
-    <div className={cn("anim-settle", className)} role="status">
-      <p className="mb-2 px-0.5 text-aside text-dim">
-        <span className="tnum text-foreground">{left}초</span> 뒤에 결제를 진행해요. 화면을 떠나면 보류돼요.
+    <div className={cn("anim-settle", className)}>
+      <p id={said} className="mb-2 px-0.5 text-aside text-dim">
+        <span aria-hidden className="tnum text-foreground">{left}초</span>
+        <span className="sr-only">{HOLD_MS / 1000}초</span> 뒤에 결제를 진행해요. 화면을 떠나면 보류돼요.
       </p>
       <button
         type="button"
         onClick={onCancel}
+        aria-describedby={said}
         className="relative h-11 w-full overflow-hidden rounded-lg border border-edge bg-glass text-ui font-medium text-foreground focus-ring mouse:h-8 mouse:text-[0.8rem]"
       >
         <span aria-hidden className="hold-drain absolute inset-0 bg-foreground/12" style={{ animationDuration: `${HOLD_MS}ms` }} />

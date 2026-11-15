@@ -97,6 +97,7 @@ export function CardAnswers({
   size,
   busy,
   blocked,
+  blockedWhy,
   onAnswer,
 }: {
   proposal: Proposal;
@@ -104,6 +105,8 @@ export function CardAnswers({
   busy?: boolean;
   /** Whether an answer cannot be chosen yet. */
   blocked?: (c: CardChoice) => boolean;
+  /** The id of what says why, for the answers that cannot. */
+  blockedWhy?: string;
   onAnswer: (c: CardChoice, reason?: string) => void;
 }) {
   const offered = answersOf(proposal);
@@ -164,15 +167,23 @@ export function CardAnswers({
   const pair = answers.length <= 2;
   return (
     <div ref={box}>
-      {hold.holding ? (
-        <HoldBar
-          left={hold.left}
-          onCancel={() => {
-            follow(answerAt(held.current?.at ?? 0));
-            hold.cancel();
-          }}
-        />
-      ) : asking ? (
+      {/* What the hold says - the seconds before a payment goes, that one was
+          held back - is said into a region already on the page: a line that
+          comes with a region of its own is mostly not read. The buttons and
+          the reason's form stay out of it; the focus finds those. */}
+      <div aria-live="polite">
+        {hold.holding ? (
+          <HoldBar
+            left={hold.left}
+            onCancel={() => {
+              if (hold.cancel()) follow(answerAt(held.current?.at ?? 0));
+            }}
+          />
+        ) : !asking && hold.unsent ? (
+          <HeldBack by={hold.unsent} />
+        ) : null}
+      </div>
+      {hold.holding ? null : asking ? (
         <RejectForm
           busy={busy}
           label={asking.label}
@@ -186,32 +197,31 @@ export function CardAnswers({
           onReject={(why) => onAnswer(asking, why)}
         />
       ) : (
-        <>
-          {hold.interrupted ? <HeldBack /> : null}
-          <div
-            className={cn(
-              pair
-                ? "grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5"
-                : "flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-1.5",
-            )}
-          >
-            {answers.map((c, i) => (
-              <Button
-                key={c.id || `${c.decision}-${i}`}
-                data-answer={i}
-                variant={VARIANT[c.tone ?? (c.decision === "approved" ? "approve" : "reject")]}
-                size={size}
-                onClick={() => choose(c, i)}
-                disabled={busy || (blocked?.(c) ?? false)}
-                // A label of the card's own may run to two lines on a phone: the
-                // button grows with it and never cuts it.
-                className={cn("h-auto py-2 whitespace-normal mouse:h-auto mouse:min-h-8", size === "pair" ? "min-h-12" : "min-h-11")}
-              >
-                {c.label}
-              </Button>
-            ))}
-          </div>
-        </>
+        <div
+          className={cn(
+            pair
+              ? "grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5"
+              : "flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-1.5",
+          )}
+        >
+          {answers.map((c, i) => (
+            <Button
+              key={c.id || `${c.decision}-${i}`}
+              data-answer={i}
+              variant={VARIANT[c.tone ?? (c.decision === "approved" ? "approve" : "reject")]}
+              size={size}
+              onClick={() => choose(c, i)}
+              disabled={busy || (blocked?.(c) ?? false)}
+              aria-describedby={blocked?.(c) ? blockedWhy : undefined}
+              // A label of the card's own may run to two lines on a phone: the
+              // button grows with it and never cuts it.
+              className={cn("h-auto py-2 whitespace-normal mouse:h-auto mouse:min-h-8", size === "pair" ? "min-h-12" : "min-h-11")}
+            >
+              {/* A payment let go is asked for again, in so many words. */}
+              {hold.unsent && c.decision === "approved" && holdsMoney(proposal) ? `다시 ${c.label}` : c.label}
+            </Button>
+          ))}
+        </div>
       )}
     </div>
   );

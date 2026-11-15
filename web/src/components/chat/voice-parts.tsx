@@ -21,6 +21,28 @@ export const DOT: Record<Tone, string> = {
   error: "bg-reject",
 };
 
+/**
+ * Escape leaves a voice screen, as going back does (ui/sheet.tsx BackCloses):
+ * each covers the whole screen, as a sheet would. Not while `on` is false -
+ * the stage, while its voice room is open over it. A dialog open on top (the
+ * room's 지우기) takes its own Escape first.
+ */
+export function useEscape(leave: () => void, on = true) {
+  const latest = useRef(leave);
+  useEffect(() => {
+    latest.current = leave;
+  });
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      latest.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [on]);
+}
+
 export function IconButton({
   label,
   pressed,
@@ -347,18 +369,7 @@ export function Spectrum({
     };
   }, [bins]);
 
-  return (
-    <canvas
-      ref={canvas}
-      role="img"
-      aria-label={
-        mode === "speaking"
-          ? "Jarvis가 말하는 중"
-          : mode === "listening"
-            ? "듣는 중"
-            : "대기 중"
-      }
-      className={cn("block", className)}
-    />
-  );
+  // Not read out: the status line under it says what it shows - and said
+  // 대기 중 while that line said 생각하는 중.
+  return <canvas ref={canvas} aria-hidden className={cn("block", className)} />;
 }

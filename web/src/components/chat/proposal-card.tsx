@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Check, Minus, X } from "lucide-react";
 import { CardAnswers, CardFacts, answersOf } from "@/components/chat/card-answers";
 import { Sending, Sent } from "@/components/chat/hold";
@@ -16,7 +16,7 @@ import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
 import { sentChoice, typedOn, useDecision } from "@/lib/decide";
 import { keepValue, keptValue } from "@/lib/keep";
-import { asksYesNo, chosenOf, outcomeOf, turnedDown, type Outcome } from "@/lib/outcome";
+import { asksQuestion, asksYesNo, chosenOf, outcomeOf, turnedDown, type Outcome } from "@/lib/outcome";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -90,8 +90,9 @@ export function ProposalCard({
   // Said under the buttons only when no answer that runs can be chosen yet.
   const runs = answersOf(proposal).filter((c) => c.decision === "approved");
   const stuck = runs.length > 0 && runs.every((c) => missingFor(c).length > 0);
-  // A card that offers only answers, none of them a turn-down, is a question.
-  const question = yesNo || Boolean(proposal.card.choices?.length && proposal.card.choices.every((c) => c.tone !== "reject"));
+  // That line, read with the 승인 it keeps off.
+  const stuckWhy = useId();
+  const question = asksQuestion(proposal);
 
   async function decide(c: CardChoice, because?: string) {
     if (!(await decision.answer(c, because))) return;
@@ -185,30 +186,36 @@ export function ProposalCard({
       </div>
 
       <div className="border-t border-edge-soft px-3 py-2.5 sm:px-4">
-        {settled ? (
-          <p
-            className={cn(
-              "anim-settle flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta",
-              settled.tone,
-            )}
-          >
-            <settled.Icon aria-hidden className="size-3.5" />
-            {settled.label}
-            <span className="tnum text-faint">· {proposal.decidedAt}</span>
-            {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
-            {proposal.reason ? <span className="text-faint">· 이유: {proposal.reason}</span> : null}
-            {/* Where a no goes: mind's own question, turned down, is not put
-                again for a while (its topic two weeks, an entry like it a
-                month, a place told 다시 묻지 마 never). */}
-            {turnedDown(proposal) && proposal.action.kind === ACTION.mindApprove ? (
-              <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
-            ) : null}
-          </p>
-        ) : decision.busy ? (
-          <Sending />
-        ) : decision.sent ? (
-          <Sent decision={decision.sent} yesNo={yesNo} label={sentChoice(proposal.id)} />
-        ) : (
+        {/* What becomes of the decision - on its way, taken, how it ended - is
+            heard as it comes, 실패함 above all: said into a region already on
+            the page, where the card's end went by in silence. */}
+        <div aria-live="polite">
+          {settled ? (
+            <p
+              className={cn(
+                "anim-settle flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta",
+                settled.tone,
+              )}
+            >
+              <settled.Icon aria-hidden className="size-3.5" />
+              {settled.label}
+              <span className="tnum text-faint">· {proposal.decidedAt}</span>
+              {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
+              {proposal.reason ? <span className="text-faint">· 이유: {proposal.reason}</span> : null}
+              {/* Where a no goes: mind's own question, turned down, is not put
+                  again for a while (its topic two weeks, an entry like it a
+                  month, a place told 다시 묻지 마 never). */}
+              {turnedDown(proposal) && proposal.action.kind === ACTION.mindApprove ? (
+                <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
+              ) : null}
+            </p>
+          ) : decision.busy ? (
+            <Sending />
+          ) : decision.sent ? (
+            <Sent decision={decision.sent} yesNo={yesNo} label={sentChoice(proposal.id)} />
+          ) : null}
+        </div>
+        {settled || decision.busy || decision.sent ? null : (
           /* This is the decision the whole product exists to collect, and on
              a phone it was a pair of 32px targets sitting a thumb-width apart.
              Full width, 48px, and a real gap between them: reaching for 승인
@@ -218,13 +225,14 @@ export function ProposalCard({
             size="pair"
             busy={decision.busy}
             blocked={(c) => c.decision === "approved" && missingFor(c).length > 0}
+            blockedWhy={stuck ? stuckWhy : undefined}
             onAnswer={(c, why) => void decide(c, why)}
           />
         )}
         {/* What a field still needs is said with the buttons, not under a
             decision on its way: a login's typed values are cleared once sent. */}
         {!settled && (decision.refusal || (stuck && !decision.busy && !decision.sent)) ? (
-          <p role={decision.refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", decision.refusal ? "text-reject" : "text-faint")}>
+          <p id={stuckWhy} role={decision.refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", decision.refusal ? "text-reject" : "text-dim")}>
             {decision.refusal ?? `${missing.map((f) => (f.kind === "number" ? money(f).label : f.label)).join(", ")}을(를) 적으면 승인할 수 있어요.`}
           </p>
         ) : null}
@@ -299,23 +307,31 @@ function FormFields({
   values: Record<string, string>;
   onChange: (key: string, value: string) => void;
 }) {
+  // Each card's own: two listings waiting at once both had a field-price, and
+  // the second card's label put the caret in the first card's price.
+  const card = useId();
   return (
     <div className="mt-4 space-y-3.5">
       {fields.map((f) => {
-        const id = `field-${f.key}`;
+        const id = `${card}-${f.key}`;
         const value = values[f.key] ?? "";
         const { label, won } = f.kind === "number" ? money(f) : { label: f.label, won: false };
+        // What 승인 waits on, said by the field itself - not only under the
+        // buttons once 승인 is off. Part of the name, so it is heard too.
+        const required = f.required ? <span className="text-faint"> · 필수</span> : null;
         return (
           <div key={f.key}>
             {f.kind === "select" || f.kind === "multi" ? (
               <p id={`${id}-label`} className="mb-1.5 text-aside text-dim">
                 {f.label}
+                {required}
               </p>
             ) : (
               <FieldLabel htmlFor={id} className="mb-1.5">
                 {label}
                 {/* The 원 after the number is not read out: the label says it. */}
                 {won ? <span className="sr-only">(원)</span> : null}
+                {required}
               </FieldLabel>
             )}
             {f.kind === "number" ? (
@@ -489,7 +505,8 @@ function FormSummary({ fields }: { fields: CardField[] }) {
       {shown.map((f) => (
         <div key={f.key} className="flex gap-2">
           <dt className="shrink-0 text-faint">{f.label}</dt>
-          <dd className="tnum min-w-0 truncate text-ink">
+          {/* Two lines, not one: a title approved was cut to what a phone's width held. */}
+          <dd className="tnum min-w-0 line-clamp-2 break-words text-ink">
             {f.kind === "number" ? Number(f.value).toLocaleString("ko-KR") : f.value}
           </dd>
         </div>

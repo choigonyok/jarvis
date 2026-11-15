@@ -13,7 +13,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
+import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, useEscape, type Tone } from "@/components/chat/voice-parts";
+import { BackCloses } from "@/components/ui/sheet";
+import { diag } from "@/lib/diag";
+import { SAY } from "@/lib/say";
 import { unlockSpeech, type VoiceInfo } from "@/lib/use-speech";
 import { useWakeLock } from "@/lib/use-wake-lock";
 import { concatSamples, encodeWav, toBase64 } from "@/lib/wav";
@@ -196,7 +199,9 @@ export function VoiceSetup({
   useWakeLock(step === "recording");
   const [take, setTake] = useState<Take | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  // What went wrong: named on the status line when it is more than "do it
+  // again", and what to do said under it.
+  const [problem, setProblem] = useState<{ status?: string; hint: string } | null>(null);
   const preview = useRef<HTMLAudioElement | null>(null);
 
   const finishTake = useCallback(() => {
@@ -204,7 +209,7 @@ export function VoiceSetup({
     if (!t || t.seconds < MIN_SECONDS) {
       setTake(null);
       setStep("idle");
-      setProblem(t ? "녹음이 너무 짧아요. 대본을 끝까지 읽어 주세요." : "녹음된 소리가 없어요.");
+      setProblem({ hint: t ? "녹음이 너무 짧아요. 대본을 끝까지 읽어 주세요." : "녹음된 소리가 없어요." });
       return;
     }
     setTake(t);
@@ -254,38 +259,55 @@ export function VoiceSetup({
     void el.play().catch(() => stopPreview());
   }
 
+  // A failed save or removal is said as what to do. The service's own words
+  // and the code went on screen as they came ("저장하지 못했어요 (502).") -
+  // they are the diagnostics', as on the stage. Code 0 is no answer at all.
   async function save() {
     if (!take) return;
     stopPreview();
     setStep("saving");
     setProblem(null);
+    let code = 0;
     try {
       const res = await fetch("/api/tts/voice", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: SCRIPT, audio: toBase64(encodeWav(take.samples, take.rate)) }),
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `저장하지 못했어요 (${res.status}).`);
+      code = res.status;
+      if (res.ok) {
+        await onChanged();
+        setStep("saved");
+        return;
       }
-      await onChanged();
-      setStep("saved");
-    } catch (err) {
-      setStep("recorded");
-      setProblem(err instanceof Error ? err.message : "저장하지 못했어요.");
+    } catch {
+      // Said below.
     }
+    diag("voice", { ev: "tts.save-failed", status: code });
+    setStep("recorded");
+    // The take is still here, and sending it again is the way: 다시 beside
+    // it would record anew.
+    setProblem({
+      status: "저장하지 못했어요",
+      hint: code ? "녹음은 그대로 있어요. 잠시 뒤 '이 목소리로'를 다시 눌러 주세요." : `${SAY.offline} 녹음은 그대로 있어요.`,
+    });
   }
 
   async function forget() {
     setProblem(null);
+    let code = 0;
     try {
       const res = await fetch("/api/tts/voice", { method: "DELETE" });
-      if (!res.ok) throw new Error(`지우지 못했어요 (${res.status}).`);
-      await onChanged();
-    } catch (err) {
-      setProblem(err instanceof Error ? err.message : "지우지 못했어요.");
+      code = res.status;
+      if (res.ok) {
+        await onChanged();
+        return;
+      }
+    } catch {
+      // Said below.
     }
+    diag("voice", { ev: "tts.forget-failed", status: code });
+    setProblem({ status: "지우지 못했어요", hint: code ? "잠시 뒤 다시 지워 주세요." : SAY.offline });
   }
 
   function leave() {
@@ -293,13 +315,16 @@ export function VoiceSetup({
     stopPreview();
     onBack();
   }
+  // Going back, or Escape, is back to the stage - not out of voice mode, and
+  // not off the conversation.
+  useEscape(leave);
 
   const recording = step === "recording";
   const kept = voice.state === "ready";
   const unavailable = voice.state === "unavailable";
 
   const status: { text: string; tone: Tone } = recorder.error || problem
-    ? { text: "다시 해 주세요", tone: "error" }
+    ? { text: problem?.status ?? "다시 해 주세요", tone: "error" }
     : unavailable && step === "idle"
       ? { text: "목소리 서비스에 닿지 못했어요", tone: "error" }
       : recording
@@ -316,7 +341,7 @@ export function VoiceSetup({
 
   const hint =
     recorder.error ??
-    problem ??
+    problem?.hint ??
     (unavailable && step === "idle"
       ? "맥미니의 목소리 서비스가 꺼져 있거나 닿지 않아요. 켜진 뒤 다시 열어 주세요."
       : step === "idle"
@@ -329,6 +354,7 @@ export function VoiceSetup({
 
   return (
     <div className="pb-safe pt-safe inset-x-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background">
+      <BackCloses close={leave} />
       <div className="flex h-13 shrink-0 items-center justify-between px-3 sm:h-14 sm:px-6">
         <IconButton onClick={leave} label="음성 모드로 돌아가기">
           <ArrowLeft aria-hidden className="size-[18px]" />

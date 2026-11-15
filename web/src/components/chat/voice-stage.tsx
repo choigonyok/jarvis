@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioLines, Keyboard, Mic, Volume2, VolumeX } from "lucide-react";
-import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
+import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, useEscape, type Tone } from "@/components/chat/voice-parts";
 import { VoiceSetup } from "@/components/chat/voice-setup";
+import { BackCloses } from "@/components/ui/sheet";
+import { onFocusProposal } from "@/lib/resume";
+import { SAY } from "@/lib/say";
+import type { Proposal } from "@/lib/thread";
 import { useMicLevel } from "@/lib/use-mic-level";
 import { capturesAlone, primePlayer, unlockSpeech, useRecognition, type Speaker, type VoiceInfo } from "@/lib/use-speech";
 import { useWakeLock } from "@/lib/use-wake-lock";
@@ -34,6 +38,8 @@ export function VoiceStage({
   muted,
   onMutedChange,
   onExit,
+  waiting = [],
+  onCard,
   lastSaid,
   thinking,
   progress,
@@ -59,6 +65,10 @@ export function VoiceStage({
   muted: boolean;
   onMutedChange: (muted: boolean) => void;
   onExit: () => void;
+  /** The cards waiting on a decision, oldest first. The stage draws none of them. */
+  waiting?: Proposal[];
+  /** Leaves for a card, to be brought into view in the conversation. */
+  onCard?: (id: string) => void;
   /** The newest agent line, for the one-line caption. */
   lastSaid?: string;
   thinking: boolean;
@@ -302,18 +312,49 @@ export function VoiceStage({
     onExit();
   }
 
+  // A card is decided where it is drawn, in the conversation: the 결재 대기
+  // line leaves for the newest one waiting - the one just said aloud - and a
+  // push about a card, tapped while the stage is up, for that card.
+  function toCard(id: string) {
+    end();
+    onCard?.(id);
+  }
+  const toCardRef = useRef(toCard);
+  useEffect(() => {
+    toCardRef.current = toCard;
+  });
+  useEffect(() => onFocusProposal((id) => toCardRef.current(id)), []);
+  const newest = onCard ? waiting.at(-1) : undefined;
+
   // Teaching your voice needs the microphone to itself, and silence from Jarvis.
   function openSetup() {
     end();
     setSetup(true);
   }
 
+  // Going back, or Escape, closes the stage as it closes a sheet: it covers
+  // the whole screen, and a back swipe left the conversation for the screen
+  // before it - to find the stage again on coming back. Its history entry
+  // stays while the voice room is open, so going back there closes the
+  // room alone.
+  useEscape(leave, !setup);
+  const back = <BackCloses close={leave} />;
+
   if (setup) {
-    return <VoiceSetup voice={voice} onBack={() => setSetup(false)} onChanged={onVoiceChanged} />;
+    return (
+      <>
+        {back}
+        <VoiceSetup voice={voice} onBack={() => setSetup(false)} onChanged={onVoiceChanged} />
+      </>
+    );
   }
 
-  const status: { text: string; tone: Tone } = !started
-    ? { text: "대기 중", tone: "idle" }
+  // A browser without recognition has no 시작 to press: said so on every
+  // line, not 대기 중 over "시작을 누르고 말하세요".
+  const status: { text: string; tone: Tone } = !supported
+    ? { text: "쓸 수 없어요", tone: "idle" }
+    : !started
+      ? { text: "대기 중", tone: "idle" }
     : stopped
       ? { text: "음성 인식 멈춤", tone: "error" }
       : paused && !speaking
@@ -340,7 +381,9 @@ export function VoiceStage({
   // turns it holds Jarvis's last answer, with your question above it.
   let caption: React.ReactNode;
   let echo: string | undefined;
-  if (!started) {
+  if (!supported) {
+    caption = <Caption tone="hint" text="이 브라우저는 음성 인식을 지원하지 않아요. Chrome이나 Safari에서 열면 쓸 수 있어요." />;
+  } else if (!started) {
     caption = (
       <Caption
         tone="hint"
@@ -367,8 +410,9 @@ export function VoiceStage({
       <Caption
         tone="hint"
         text={
+          // Settings, not the browser's: a home-screen app has none of its own.
           state === "denied"
-            ? "마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 시작하세요."
+            ? "마이크 권한이 필요해요. 설정에서 허용한 뒤 다시 시도를 눌러 주세요."
             : failure(error)
         }
       />
@@ -391,21 +435,44 @@ export function VoiceStage({
   }
 
   return (
+    <>
+    {back}
     <div className="pb-safe pt-safe inset-x-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background">
       {/* One way out, the keyboard on the right: an ✕ on the left did the
           same thing under another name. */}
       <div className="flex h-13 shrink-0 items-center justify-end px-3 sm:h-14 sm:px-6">
+        {/* What waits on you, where the bar over every other screen says it.
+            Without it a card raised while you talked was neither seen nor
+            heard here. The region stays, so one that comes is said. */}
+        <div aria-live="polite" className="mr-auto min-w-0">
+          {newest ? (
+            <button
+              type="button"
+              onClick={() => toCard(newest.id)}
+              className="tap flex max-w-full items-center gap-2 rounded-lg px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring"
+            >
+              <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
+              <span className="truncate">
+                결재 대기 <span className="tnum">{waiting.length}건</span> · <span className="text-foreground">보기</span>
+              </span>
+            </button>
+          ) : null}
+        </div>
         <div className="flex items-center gap-1">
-          <IconButton onClick={openSetup} label={ownVoice ? "내 목소리 (등록됨)" : "내 목소리 등록"}>
+          <IconButton onClick={openSetup} label={ownVoice ? "내 목소리 (등록됨)" : "내 목소리 등록"} className="relative">
             <AudioLines aria-hidden className={cn("size-[18px]", ownVoice && "text-online/80")} />
+            {/* On file, said by a mark as well as the colour. */}
+            {ownVoice ? <span aria-hidden className="absolute top-2.5 right-2.5 size-[5px] rounded-full bg-online" /> : null}
           </IconButton>
+          {/* One name, and whether it is on: "음성 답변 켜기, 선택됨" read
+              the other way round. */}
           <IconButton
             onClick={() => {
               if (!muted) onStopSpeaking();
               onMutedChange(!muted);
             }}
-            label={muted ? "음성 답변 켜기" : "음성 답변 끄기"}
-            pressed={muted}
+            label="음성 답변"
+            pressed={!muted}
           >
             {muted ? (
               <VolumeX aria-hidden className="size-[18px]" />
@@ -485,10 +552,18 @@ export function VoiceStage({
 
       <div className="flex shrink-0 flex-col items-center justify-center gap-4 px-6 pt-2 pb-8">
         {!supported ? (
-          <p className="max-w-[26rem] text-center text-ui leading-relaxed text-dim">
-            이 브라우저는 음성 인식을 지원하지 않아요. Chrome이나 Safari에서
-            열면 쓸 수 있어요.
-          </p>
+          <PrimaryButton onClick={leave}>
+            <Keyboard aria-hidden className="size-4" />
+            채팅으로 돌아가기
+          </PrimaryButton>
+        ) : started && stopped ? (
+          // Trying again is the next thing, in the tap the microphone asks
+          // for - not 끝내기, then 시작. A language the browser lacks is not
+          // fixed by trying again.
+          <div className="flex items-center gap-3">
+            {error === "language-not-supported" ? null : <PrimaryButton onClick={begin}>{SAY.retry}</PrimaryButton>}
+            <QuietButton onClick={end}>끝내기</QuietButton>
+          </div>
         ) : started && (paused || (speaking && !stopped)) ? (
           <div className="flex items-center gap-3">
             <PrimaryButton onClick={resume}>
@@ -535,6 +610,7 @@ export function VoiceStage({
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -577,12 +653,12 @@ function useHeard(signal: number): number {
 function failure(code: string | null) {
   switch (code) {
     case "network":
-      return "음성 인식 서버에 연결하지 못했어요. 끝내기를 누른 뒤 다시 시작해 보세요.";
+      return "음성 인식 서버에 연결하지 못했어요. 다시 시도를 눌러 보세요.";
     case "audio-capture":
-      return "마이크 소리를 받지 못했어요. 입력 장치를 확인해 주세요.";
+      return "마이크 소리를 받지 못했어요. 입력 장치를 확인한 뒤 다시 시도를 눌러 주세요.";
     case "language-not-supported":
       return "이 브라우저는 한국어를 알아듣지 못해요. Safari나 Chrome에서 열어 주세요.";
     default:
-      return "음성 인식이 멈췄어요. 끝내기를 누른 뒤 다시 시작해 보세요.";
+      return "음성 인식이 멈췄어요. 다시 시도를 눌러 보세요.";
   }
 }

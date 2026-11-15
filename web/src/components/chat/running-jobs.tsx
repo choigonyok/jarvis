@@ -56,10 +56,14 @@ function RunningJobsView({ jobs, onOpen }: { jobs: Job[]; onOpen: (id: number) =
   if (jobs.length === 0) return null;
   const shown = jobs.length > ROWS ? jobs.slice(0, ROWS - 1) : jobs;
   const rest = jobs.length - shown.length;
+  // The focus ring every other control has, drawn inside: the strip runs the
+  // screen's width. A shade lighter glass was all there was, and the focus
+  // was lost on it.
   const row =
-    "tap mx-auto flex w-full max-w-page items-center gap-2.5 px-4 text-left outline-none focus-visible:bg-glass-raised sm:px-8 mouse:min-h-9";
+    "tap mx-auto flex w-full max-w-page items-center gap-2.5 px-4 text-left focus-ring focus-visible:ring-inset sm:px-8 mouse:min-h-9";
   return (
-    <div className="inset-x-safe shrink-0 border-t border-edge-soft bg-glass" aria-label="진행 중인 작업">
+    // A group, so its name is read: on a bare div it was not.
+    <div role="group" className="inset-x-safe shrink-0 border-t border-edge-soft bg-glass" aria-label="진행 중인 작업">
       {shown.map((j) => (
         <button key={j.id} type="button" onClick={() => onOpen(j.id)} className={cn(row, "group")}>
           <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-approve" />

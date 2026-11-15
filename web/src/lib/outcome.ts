@@ -13,6 +13,14 @@ export function asksYesNo(p: Pick<Proposal, "action">): boolean {
 }
 
 /**
+ * A card that waits for an answer rather than a decision (답 대기, not 결재
+ * 대기): 예 and 아니요, or answers of its own none of which turns it down.
+ */
+export function asksQuestion(p: Pick<Proposal, "action" | "card">): boolean {
+  return asksYesNo(p) || Boolean(p.card.choices?.length && p.card.choices.every((c) => c.tone !== "reject"));
+}
+
+/**
  * How a card ended, as it reads. Not the state alone: a card nobody decided -
  * taken down because what it asked stopped mattering (its job's turn came, a
  * corrected card took its place) - reads rejected to every service, and was

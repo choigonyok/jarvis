@@ -76,7 +76,10 @@ export function ChecklistBody({
   }, [all]);
   // Items ticked on this screen draw their mark in; ones ticked before just are.
   const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // What did not go, said under the row it was pressed on (a failure puts the
+  // row back as it was). At the foot of a long list it was a screen below the
+  // thumb, and the tick only undid itself.
+  const [refusal, setRefusal] = useState<{ id: string; text: string } | null>(null);
 
   // Each struck item's five seconds. Leaving the screen is not an undo: what
   // is still waiting goes then, as the calendar's removals do.
@@ -114,7 +117,7 @@ export function ChecklistBody({
     const next = !item.done;
     if (next) setFresh((cur) => new Set(cur).add(item.id));
     const said = await onTick(item.id, next);
-    if (said) setRefusal(said);
+    if (said) setRefusal({ id: item.id, text: said });
   }
 
   function strike(item: ChecklistItem) {
@@ -131,7 +134,7 @@ export function ChecklistBody({
           next.delete(item.id);
           return next;
         });
-        if (said) setRefusal(said);
+        if (said) setRefusal({ id: item.id, text: said });
       }, UNDO_MS),
     );
   }
@@ -208,15 +211,17 @@ export function ChecklistBody({
                 item={item}
                 draw={fresh.has(item.id)}
                 struck={striking.has(item.id)}
+                failed={refusal?.id === item.id ? refusal.text : undefined}
                 onToggle={() => void toggle(item)}
                 onStrike={onDrop ? () => strike(item) : undefined}
                 onUnstrike={() => unstrike(item)}
               />
             ))}
           </ul>
-          {refusal ? (
+          {/* Only for a row no longer on the list to say it under. */}
+          {refusal && !items.some((i) => i.id === refusal.id) ? (
             <p role="alert" className="mt-1 px-0.5 text-aside text-reject">
-              {refusal}
+              {refusal.text}
             </p>
           ) : null}
           {onClose ? <CloseList onClose={onClose} /> : null}
@@ -243,6 +248,7 @@ function Row({
   item,
   draw,
   struck,
+  failed,
   onToggle,
   onStrike,
   onUnstrike,
@@ -250,6 +256,8 @@ function Row({
   item: ChecklistItem;
   draw: boolean;
   struck: boolean;
+  /** What the last press on this row could not do. */
+  failed?: string;
   onToggle: () => void;
   onStrike?: () => void;
   onUnstrike: () => void;
@@ -379,6 +387,12 @@ function Row({
           </>
         )}
       </div>
+      {/* Under the words, past the ring they are ticked in. */}
+      {failed ? (
+        <p role="alert" className="pr-2 pb-1.5 pl-10 text-aside text-reject">
+          {failed}
+        </p>
+      ) : null}
     </li>
   );
 }

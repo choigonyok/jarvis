@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { BellRing } from "lucide-react";
 import { ChecklistBody, type Drop, type Fold, type Tick } from "@/components/chat/checklist";
 import { GoalAsks } from "@/components/chat/goal-asks";
@@ -36,7 +36,22 @@ export function NoticeCard({
   const [said, ...more] = turn.paragraphs ?? [];
   const body = more.join("\n\n");
   const [open, setOpen] = useState(false);
-  const long = body.length > 160 || body.split("\n").length > 3;
+  // Whether the words run past the four lines shown, measured - again as the
+  // width changes. Guessed from their length, four short lines had a 더 보기
+  // that opened nothing, and a long line on a wide screen another. More than
+  // half a line past: a list's own margin under its last line is not more.
+  const words = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = words.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const line = parseFloat(getComputedStyle(el.firstElementChild ?? el).lineHeight) || 20;
+      setClipped(el.scrollHeight - el.clientHeight > line / 2);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [body]);
   const why = turn.origin?.title;
   // What was only said: a list copies itself, and a goal's question is answered.
   const copied = !turn.origin?.checklist && !turn.origin?.goals?.length ? [said, body].filter(Boolean).join("\n") : "";
@@ -51,11 +66,11 @@ export function NoticeCard({
       ) : null}
       {said ? <h3 className={cn("text-title leading-snug font-medium text-foreground", why && "mt-1.5", copied && !why && "pr-7")}>{said}</h3> : null}
       {body ? (
-        <div className={cn("mt-1 text-ui leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && long && "line-clamp-4")}>
+        <div ref={words} className={cn("mt-1 text-ui leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && "line-clamp-4")}>
           <Markdown>{body}</Markdown>
         </div>
       ) : null}
-      {body && long ? (
+      {body && (clipped || open) ? (
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
