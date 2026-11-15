@@ -91,10 +91,12 @@ export function ModesSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+      <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
         <BottomSheetHeader className="pb-1 sm:px-6">
           <BottomSheetTitle className="pr-0">위치 등록과 모드</BottomSheetTitle>
         </BottomSheetHeader>
+        {/* Only what is under the title scrolls: the ✕ and the handle stay. */}
+        <div className="scrollbar-hairline min-h-0 overflow-y-auto overscroll-contain">
         <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-ui leading-[1.65] text-dim sm:px-6">
           {today ? (
             <Part title="지금">
@@ -152,6 +154,7 @@ export function ModesSheet({
               <Setting term="영역 반경">모두 {RADIUS}m</Setting>
             </dl>
           </Part>
+        </div>
         </div>
       </BottomSheetContent>
     </Sheet>

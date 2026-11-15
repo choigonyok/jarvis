@@ -590,11 +590,12 @@ function Viewer({
       />
 
       <Sheet open={connecting} onOpenChange={setConnecting}>
-        <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+        <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
           <BottomSheetHeader className="pb-1 sm:px-4">
             <BottomSheetTitle className="pr-0 text-body">내 폰 연결</BottomSheetTitle>
           </BottomSheetHeader>
-          <div className="px-4 pb-6 text-ui">
+          {/* Only what is under the title scrolls: the ✕ and the handle stay. */}
+          <div className="scrollbar-hairline min-h-0 overflow-y-auto overscroll-contain px-4 pb-6 text-ui">
             <PhoneSetup who="guest" />
           </div>
         </BottomSheetContent>

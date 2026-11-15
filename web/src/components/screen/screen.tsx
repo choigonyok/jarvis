@@ -321,10 +321,13 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
       <main
         ref={box}
         className={cn(
-          "inset-x-safe min-h-0 flex-1",
+          "min-h-0 flex-1",
+          // Full screen, each edge keeps the notch's and the home indicator's
+          // room as its least: a landscape phone is as wide as sm, and a plain
+          // sm:p-6 there put the remote's edge under the notch.
           controlling
-            ? "pb-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background p-3 pt-[max(env(safe-area-inset-top),0.75rem)] sm:p-6"
-            : "mx-auto flex w-full max-w-page flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
+            ? "screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background pt-[max(env(safe-area-inset-top),0.75rem)] pr-[max(env(safe-area-inset-right),0.75rem)] pb-[max(env(safe-area-inset-bottom),0.75rem)] pl-[max(env(safe-area-inset-left),0.75rem)] sm:pr-[max(env(safe-area-inset-right),1.5rem)] sm:pb-[max(env(safe-area-inset-bottom),1.5rem)] sm:pl-[max(env(safe-area-inset-left),1.5rem)]"
+            : "inset-x-safe mx-auto flex w-full max-w-page flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
         )}
       >
         <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">

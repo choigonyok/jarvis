@@ -119,12 +119,16 @@ export function RouteEditor({
   const [entered, setEntered] = useState(false);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <BottomSheetContent width="full" height="tall" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto" guard={entered}>
+      <BottomSheetContent width="full" height="tall" keepFocus={false} aria-describedby={undefined} className="gap-4" guard={entered}>
         <BottomSheetHeader className="pb-1 sm:px-6">
-          <BottomSheetTitle className="pr-0">{route ? `${route.name} 경로 고치기` : "경로 추가"}</BottomSheetTitle>
+          <BottomSheetTitle>{route ? `${route.name} 경로 고치기` : "경로 추가"}</BottomSheetTitle>
         </BottomSheetHeader>
-        {/* Keyed so a new opening starts from what is being changed. */}
-        {open ? <Form key={route?.id ?? "new"} who={who} route={route} onSave={onSave} onDelete={onDelete} onEntered={setEntered} /> : null}
+        {/* Only what is under the title scrolls: the ✕, the handle and the
+            name stay where a hand looks for them. Keyed so a new opening
+            starts from what is being changed. */}
+        <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {open ? <Form key={route?.id ?? "new"} who={who} route={route} onSave={onSave} onDelete={onDelete} onEntered={setEntered} /> : null}
+        </div>
       </BottomSheetContent>
     </Sheet>
   );
