@@ -71,6 +71,13 @@ function inViewOf(view: string, r: Region) {
   return view === "all" || r.sido === view;
 }
 
+/**
+ * The shortest side, on screen, a region of the whole country may have and
+ * still be picked by a press: below it a finger lands on a neighbour as often
+ * as on it (a phone's map is 327px wide, and a hundred regions are under this).
+ */
+const PRESSABLE_PX = 24;
+
 /** The box a 시/도 takes, with room around it. */
 export function provinceBox(map: KoreaMapData, sido: string): string {
   const rs = map.regions.filter((r) => r.sido === sido);
@@ -98,6 +105,7 @@ export function KoreaMap({
   marked,
   selected,
   onSelect,
+  onNear,
   labels,
   size = "thumb",
   className,
@@ -110,6 +118,8 @@ export function KoreaMap({
   marked?: ReadonlySet<string>;
   selected?: string | null;
   onSelect?: (code: string) => void;
+  /** On the whole country, a region too small to press brings its 시/도 near instead of being picked. */
+  onNear?: (sido: string) => void;
   labels?: boolean;
   /** Which size of each photo: a whole country of tiles wants the small one. */
   size?: "thumb" | "display";
@@ -117,7 +127,7 @@ export function KoreaMap({
 }) {
   const uid = useId().replace(/:/g, "");
   const viewBox = view === "all" ? map.viewBox : provinceBox(map, view);
-  const width = Number(viewBox.split(" ")[2]);
+  const [, , width, height] = viewBox.split(" ").map(Number);
   // Near, the 시/도 is drawn with its neighbours faint around it: Seoul is
   // not a hole in 경기.
   const regions = map.regions;
@@ -136,6 +146,19 @@ export function KoreaMap({
         : [],
     [labels, map, view, font],
   );
+
+  // A region the size of a fingertip or less on the whole country: the press
+  // brings its 시/도 near, where it is bigger and named, rather than opening
+  // whichever neighbour the finger happened to land on.
+  function choose(r: Region, pressed: SVGElement) {
+    const svg = pressed.ownerSVGElement;
+    if (view === "all" && onNear && svg) {
+      const shown = svg.getBoundingClientRect();
+      const scale = Math.min(shown.width / width, shown.height / height);
+      if (Math.min(r.box[2], r.box[3]) * scale < PRESSABLE_PX) return onNear(r.sido);
+    }
+    onSelect?.(r.code);
+  }
 
   // A map to press is a group of its regions' buttons - an image's insides
   // are read as nothing - named for the 시/도 on it, not the list's first.
@@ -160,15 +183,15 @@ export function KoreaMap({
         const here = inView(r);
         const press = onSelect && here
           ? {
-              onClick: () => onSelect(r.code),
+              onClick: (e: React.MouseEvent<SVGElement>) => choose(r, e.currentTarget),
               role: "button" as const,
               tabIndex: view === "all" ? -1 : 0,
               "aria-label": `${r.name}${face || marked?.has(r.code) ? " · 가 봤어요" : ""}`,
               "aria-pressed": selected === r.code,
-              onKeyDown: (e: React.KeyboardEvent) => {
+              onKeyDown: (e: React.KeyboardEvent<SVGElement>) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  onSelect(r.code);
+                  choose(r, e.currentTarget);
                 }
               },
               className: "cursor-pointer outline-none focus-visible:[stroke:var(--foreground)] focus-visible:[stroke-width:2px]",

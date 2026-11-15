@@ -40,7 +40,9 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
   const [finding, setFinding] = useState(false);
   const [editing, setEditing] = useState<DateRecord | "new" | null>(null);
   const [viewing, setViewing] = useState<{ list: Visit[]; at: number } | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  // A change that did not go, said where it was pressed - under the face's
+  // buttons or under the trips' photos - not at the panel's foot.
+  const [note, setNote] = useState<{ at: "face" | "photos"; text: string } | null>(null);
   // The photo a 지우기 asks about first - the one open in the viewer, or the
   // face - kept as the question fades out, so its words stay as they were.
   const [asking, setAsking] = useState(false);
@@ -100,17 +102,17 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
     requestAnimationFrame(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   }
 
-  async function act(run: () => Promise<{ ok: boolean; error?: string }>) {
+  async function act(run: () => Promise<{ ok: boolean; error?: string }>, at: "face" | "photos") {
     setNote(null);
     const sent = await run();
-    if (!sent.ok) setNote(sent.error ?? SAY.couldNotSave);
+    if (!sent.ok) setNote({ at, text: sent.error ?? SAY.couldNotSave });
     await onChanged();
   }
 
   async function putFace(files: File[]) {
     const [asset] = await uploads.upload(files.slice(0, 1));
     if (!asset || !picked) return;
-    await act(() => writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset, face: true }));
+    await act(() => writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset, face: true }), "face");
   }
 
   function ask(v: Visit) {
@@ -121,7 +123,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
   /** The photo asked about, taken off once the answer is yes; a viewer it was asked from closes only now. */
   function drop() {
     setViewing(null);
-    if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`));
+    if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`), asked.rep ? "face" : "photos");
   }
 
   return (
@@ -147,11 +149,6 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
         <WorldMap map={map} faces={faces} selected={picked} onSelect={pick} size={picked ? "display" : "thumb"} className="h-auto w-full" />
       </div>
       <p className="mt-1.5 text-tiny text-faint">경계: Natural Earth</p>
-      {note && !country ? (
-        <p role="alert" className="mt-2 text-aside text-reject">
-          {note}
-        </p>
-      ) : null}
 
       {country ? (
         <section ref={panel} className="mt-5 scroll-mt-24 rounded-2xl bg-glass p-4 sm:p-5" aria-label={country.name}>
@@ -191,6 +188,11 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
                 </Button>
               ) : null}
             </div>
+            {note?.at === "face" || uploads.error ? (
+              <p role="alert" className="mt-2 text-aside text-reject">
+                {note?.at === "face" ? note.text : uploads.error}
+              </p>
+            ) : null}
           </div>
 
           {trips.length ? (
@@ -233,12 +235,12 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
               onOpen={(i) => setViewing({ list: tripPhotos, at: i })}
             />
           ) : null}
-
-          {note || uploads.error ? (
+          {note?.at === "photos" ? (
             <p role="alert" className="mt-2 text-aside text-reject">
-              {note ?? uploads.error}
+              {note.text}
             </p>
           ) : null}
+
           {viewOnly ? null : (
             <Button variant="raised" size="touch" onClick={() => setEditing("new")} className="mt-3 w-full gap-1.5">
               <Plus aria-hidden className="size-4" />
@@ -279,7 +281,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
                   <ViewerAction
                     onClick={() => {
                       setViewing(null);
-                      if (picked) void act(() => writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset: v.asset, face: true }));
+                      if (picked) void act(() => writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset: v.asset, face: true }), "face");
                     }}
                   >
                     대표로

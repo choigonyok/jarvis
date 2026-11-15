@@ -70,21 +70,38 @@ export async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function smartSearch(query: string): Promise<Asset[]> {
+/** How many a search reads at a time. */
+const SEARCH_PAGE = 120;
+
+/**
+ * A page of a search by what is in the picture, closest first, and the page
+ * after it - null where there is none. A page is not all there is: 120 had
+ * read as "120 found".
+ */
+export async function smartSearch(query: string, page = 1): Promise<{ assets: Asset[]; next: number | null }> {
   const res = await fetch(`${PHOTOS}/search/smart`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query, size: 120 }),
+    body: JSON.stringify({ query, page, size: SEARCH_PAGE }),
   });
   if (!res.ok) throw new Error(String(res.status));
   const body = (await res.json()) as {
-    assets: { items: { id: string; type: string; duration: string | null; fileCreatedAt: string; exifInfo?: { exifImageWidth?: number; exifImageHeight?: number } }[] };
+    assets: {
+      items: { id: string; type: string; duration: string | null; fileCreatedAt: string; exifInfo?: { exifImageWidth?: number; exifImageHeight?: number } }[];
+      /** The next page's number, as a string; null on the last. */
+      nextPage?: string | null;
+    };
   };
-  return body.assets.items.map((a) => ({
-    id: a.id,
-    isImage: a.type === "IMAGE",
-    duration: a.type === "VIDEO" ? a.duration : null,
-    takenAt: a.fileCreatedAt,
-    ratio: 1,
-  }));
+  const { items, nextPage } = body.assets;
+  const next = nextPage === undefined ? (items.length >= SEARCH_PAGE ? page + 1 : null) : nextPage ? Number(nextPage) : null;
+  return {
+    assets: items.map((a) => ({
+      id: a.id,
+      isImage: a.type === "IMAGE",
+      duration: a.type === "VIDEO" ? a.duration : null,
+      takenAt: a.fileCreatedAt,
+      ratio: 1,
+    })),
+    next: next && Number.isFinite(next) ? next : null,
+  };
 }

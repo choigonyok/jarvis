@@ -2,7 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
-import { Retry } from "@/components/shell/retry";
+import { Failed } from "@/components/shell/failed";
+import { useRole } from "@/components/shell/role";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,7 +51,7 @@ export function PhotoCraft() {
   return usePathname() === "/login" ? null : <Host />;
 }
 
-type Phase = "loading" | "slow" | "ready" | "stalled" | "unsupported" | "broken";
+type Phase = "loading" | "slow" | "ready" | "stalled" | "unsupported" | "signedOut" | "broken";
 
 /** After this long a first visit is told why it is waiting; after the second, that it may not arrive. */
 const SLOW_MS = 6_000;
@@ -103,7 +105,7 @@ function Host() {
         setPhase(end);
       };
       // Another origin: Access sent the frame to its sign-in page.
-      if (doc === null) return stop("broken");
+      if (doc === null) return stop("signedOut");
       const waited = Date.now() - started;
       // The frame's first, empty document, or the page still arriving.
       if (doc.URL === "about:blank" || doc.readyState === "loading") {
@@ -167,30 +169,69 @@ function Host() {
   );
 }
 
-const PROBLEM: Partial<Record<Phase, [string, string]>> = {
-  stalled: ["편집기 파일을 아직 받지 못했어요", "연결을 확인한 뒤 다시 시도하세요."],
-  unsupported: [
-    "이 브라우저에서는 편집기를 열 수 없어요",
-    "WebGPU나 WebGL2를 지원하는 브라우저가 필요해요. 최신 Chrome, Safari, Edge에서 열어 보세요.",
-  ],
-  broken: ["편집기를 열지 못했어요", "로그인이 만료됐거나 편집기 파일이 배포되지 않았어요."],
-};
+/**
+ * Why the editor did not open, what can be done about it, and - only where
+ * trying again can change it - 다시 시도. Each cause on its own: two in one
+ * sentence ("로그인이 만료됐거나 … 배포되지 않았어요") told no one what to do,
+ * and 다시 시도 made a frame that went to the same sign-in page again. Nothing
+ * here asks for what cannot be done where it is read: an iPhone's home-screen
+ * app has no other browser to open it in.
+ */
+function Problem({ phase, onRetry }: { phase: Phase; onRetry: () => void }) {
+  const guest = useRole() === "guest";
+  if (phase === "stalled") {
+    return (
+      <Failed onRetry={onRetry}>
+        <span className="block text-body text-ink">편집기 파일을 아직 받지 못했어요</span>
+        연결을 확인한 뒤 다시 시도해 주세요.
+      </Failed>
+    );
+  }
+  if (phase === "unsupported") {
+    // The browser has neither WebGPU nor WebGL2: the same on every try.
+    return (
+      <Failed>
+        <span className="block text-body text-ink">이 기기에서는 편집기를 열 수 없어요</span>
+        편집기에 필요한 그래픽 기능(WebGPU·WebGL2)을 이 브라우저에서 쓸 수 없어요.{" "}
+        <span className="pointer-fine:hidden">컴퓨터의 브라우저에서 열어 보세요.</span>
+        <span className="hidden pointer-fine:inline">최신 Chrome, Safari, Edge에서 열어 보세요.</span>
+      </Failed>
+    );
+  }
+  if (phase === "signedOut") {
+    // Signing in again is the page's own, not the frame's: loaded anew, the
+    // page shows Access's sign-in (as shell/session-watch.tsx does).
+    return (
+      <>
+        <Failed>
+          <span className="block text-body text-ink">로그인이 풀렸어요</span>
+          다시 로그인하면 편집기가 열려요.
+        </Failed>
+        <Button variant="raised" size="touch-sm" onClick={() => window.location.reload()} className="mt-3">
+          다시 로그인
+        </Button>
+      </>
+    );
+  }
+  // A page of this origin that is not the editor: its files are not there,
+  // or the server answered with an error once - which trying again can mend.
+  return (
+    <Failed onRetry={onRetry}>
+      <span className="block text-body text-ink">편집기를 열지 못했어요</span>
+      {guest
+        ? "잠시 뒤 다시 시도해 주세요. 계속 안 되면 상대에게 알려 주세요."
+        : "편집기 파일이 배포에서 빠진 것 같아요(scripts/photocraft.mjs). 다시 배포한 뒤 시도해 주세요."}
+    </Failed>
+  );
+}
 
 /** What stands in the editor's place until it runs. */
 function Status({ phase, onRetry }: { phase: Phase; onRetry: () => void }) {
-  const problem = PROBLEM[phase];
+  const waiting = phase === "loading" || phase === "slow";
   return (
-    <div role="status" className="absolute inset-0 grid place-items-center px-8 text-center">
-      {problem ? (
-        <div>
-          <p className="text-body text-ink">{problem[0]}</p>
-          <p className="mx-auto mt-1.5 max-w-[24rem] text-aside leading-relaxed text-balance text-dim">
-            {problem[1]}
-          </p>
-          <Retry onRetry={onRetry} />
-        </div>
-      ) : (
-        <div>
+    <div className="absolute inset-0 grid place-items-center px-8">
+      {waiting ? (
+        <div role="status" className="text-center">
           <p className="flex items-center justify-center gap-2 text-ui text-dim">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
             PhotoCraft를 여는 중
@@ -200,6 +241,10 @@ function Status({ phase, onRetry }: { phase: Phase; onRetry: () => void }) {
               처음 열 때는 편집기 파일을 받느라 조금 걸려요.
             </p>
           ) : null}
+        </div>
+      ) : (
+        <div className="w-full max-w-[24rem]">
+          <Problem phase={phase} onRetry={onRetry} />
         </div>
       )}
     </div>

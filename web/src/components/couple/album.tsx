@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Camera, Pin } from "lucide-react";
-import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction } from "@/components/couple/photos";
+import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction, stopper, type Uploading } from "@/components/couple/photos";
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import {
   AlertDialog,
@@ -45,7 +45,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
   // An upload under way, and which button sent it: that one counts it, and a
   // removal counts nothing - both buttons said 올리는 중… 1/3 while photos
   // were being taken out.
-  const [busy, setBusy] = useState<{ done: number; of: number; snap: boolean } | null>(null);
+  const [busy, setBusy] = useState<(Uploading & { snap: boolean }) | null>(null);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -69,10 +69,13 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
     // said - a line naming one photo's failure left the rest unknown.
     const sending = files.slice(0, BATCH);
     const left = files.length - sending.length;
-    const { up, missed, why } = await uploadEach(
+    // 멈추기 stops before the next photo; what went up until then goes in.
+    const { signal, stop } = stopper(setBusy);
+    const { up, missed, why, stopped } = await uploadEach(
       sending,
       (file) => uploadSized(block.id, file),
-      (done) => setBusy({ done, of: sending.length, snap }),
+      (done) => setBusy({ done, of: sending.length, snap, stop }),
+      signal,
     );
     const notUp = [
       missed ? (files.length > 1 ? `${missed}장은 올리지 못했어요: ${why}` : why) : "",
@@ -84,7 +87,15 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
       const sent = await writeCouple("POST", `/blocks/${block.id}/album`, { photos: up, snap });
       if (!sent.ok) setError(sent.error);
       else {
-        setNote(snap ? "찍은 사진을 올렸어요. 상대 폰에 알림이 가요." : up.length < files.length ? `${files.length}장 중 ${up.length}장을 올렸어요.` : `${up.length}장을 올렸어요.`);
+        setNote(
+          snap
+            ? "찍은 사진을 올렸어요. 상대 폰에 알림이 가요."
+            : stopped
+              ? `${files.length}장 중 ${up.length}장을 올리고 멈췄어요.`
+              : up.length < files.length
+                ? `${files.length}장 중 ${up.length}장을 올렸어요.`
+                : `${up.length}장을 올렸어요.`,
+        );
         setError(notUp || null);
       }
       await onChanged();
@@ -130,6 +141,9 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
         {photos.length !== shown.length ? <span className="text-faint"> · 동영상 {photos.length - shown.length}개는 uniple 앱에서 봐요</span> : null}
       </p>
       <div className={cn("mt-3 flex flex-wrap gap-2", viewOnly && "hidden")}>
+        {/* Only where the camera opens: a desktop browser ignores capture
+            and shows a file picker, and the file picked went to the partner
+            as a photo just taken. There 사진 추가 is the one bright button. */}
         <PickPhotos
           camera
           label="사진 찍기"
@@ -138,8 +152,15 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
           variant="raised"
           icon={<Camera aria-hidden className="size-4" />}
           onPick={(f) => void put(f, true)}
+          className="pointer-fine:hidden"
         />
-        <PickPhotos label="사진 추가" busy={busy && !busy.snap ? busy : null} disabled={!!busy || removing} onPick={(f) => void put(f, false)} />
+        <PickPhotos
+          label="사진 추가"
+          busy={busy && !busy.snap ? busy : null}
+          disabled={!!busy || removing}
+          onPick={(f) => void put(f, false)}
+          className="pointer-fine:bg-glass-raised pointer-fine:text-foreground pointer-fine:hover:bg-foreground/15"
+        />
         {shown.length > 1 && !picking ? (
           <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())}>
             여러 장 지우기
@@ -159,7 +180,9 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
       ) : null}
 
       {shown.length === 0 ? (
-        <p className="mt-6 text-ui text-faint">둘이 찍은 사진을 여기에 모아요. 사진 찍기로 바로 올리면 상대 홈에도 떠요.</p>
+        <p className="mt-6 text-ui text-faint">
+          둘이 찍은 사진을 여기에 모아요.<span className="pointer-fine:hidden"> 사진 찍기로 바로 올리면 상대 홈에도 떠요.</span>
+        </p>
       ) : (
         <ul className="mt-4 grid grid-cols-3 gap-1 sm:grid-cols-4">
           {shown.map((p, i) => (

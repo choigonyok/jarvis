@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Pin, Plus, X } from "lucide-react";
-import { KoreaMap, percent, useKoreaMap, type Face } from "@/components/couple/korea-map";
+import { KoreaMap, percent, useKoreaMap, type Face, type Region } from "@/components/couple/korea-map";
 import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction, useUploads } from "@/components/couple/photos";
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { Failed } from "@/components/shell/failed";
@@ -21,13 +21,15 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Lightbox } from "@/components/ui/lightbox";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { photoSrc, today, writeCouple, type Block, type DateRecord, type Visit } from "@/lib/couple";
 import { onOpenParams } from "@/lib/focus";
 import { SAY } from "@/lib/say";
 import { dayRange, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
+
+const byName = new Intl.Collator("ko").compare;
 
 /**
  * The date map: every 시/군/구 the two have been to, its photo filling its
@@ -44,7 +46,13 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   const [editing, setEditing] = useState<DateRecord | "new" | null>(null);
   const [viewing, setViewing] = useState<{ list: Visit[]; at: number } | null>(null);
   const [pinning, setPinning] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // A change that did not go, said where it was pressed: by the map's pin,
+  // under the face's buttons, or under the region's photos - at the panel's
+  // foot it was off the screen below a few records.
+  const [note, setNote] = useState<{ at: "map" | "face" | "photos"; text: string } | null>(null);
+  // The face's turn sent and not read back yet: a second 돌리기 turns on from
+  // it, and the viewer, left open, says it.
+  const [turned, setTurned] = useState<{ id: string; rotation: number } | null>(null);
   // The region's photos picked to take off together; null while not picking.
   const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -85,6 +93,14 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   // the app counts a region once it has a photo, and so does the home's card.
   const written = useMemo(() => new Set((block.records ?? []).map((r) => r.region).filter((r) => !faces.has(r))), [block.records, faces]);
   const been = (code: string) => faces.has(code) || written.has(code);
+  // Each 시/도's regions in 가나다 order: the list that picks by name what is
+  // too small on the map to press - a 구 of a city is a dozen pixels across
+  // even with its 시/도 near.
+  const named = useMemo(() => {
+    const out = new Map<string, Region[]>();
+    for (const r of [...(map?.regions ?? [])].sort((a, b) => byName(a.name, b.name))) out.set(r.sido, [...(out.get(r.sido) ?? []), r]);
+    return out;
+  }, [map]);
 
   // The outline on its way, or not come: the page keeps its name, and the
   // map's place holds its shape or says it did not come.
@@ -119,6 +135,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   const region = picked ? map.regions.find((r) => r.code === picked) : undefined;
   const here = visits.filter((v) => v.region === picked && v.asset);
   const face = here.find((v) => v.rep) ?? null;
+  const rotation = face ? (turned?.id === face.id ? turned.rotation : (face.rotation ?? 0)) : 0;
   const records = (block.records ?? []).filter((r) => r.region === picked);
 
   function pick(code: string) {
@@ -128,27 +145,57 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
     requestAnimationFrame(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   }
 
-  async function act(run: () => Promise<{ ok: boolean; error?: string }>) {
+  /** A 시/도 brought near (or the whole country): from the list, or by pressing a region too small to pick on the whole map. */
+  function look(code: string) {
+    setView(code);
+    setPicked(null);
+  }
+
+  const option = (r: Region) => (
+    <NativeSelectOption key={r.code} value={r.code}>
+      {`${r.name}${been(r.code) ? " · 가 봤어요" : ""}`}
+    </NativeSelectOption>
+  );
+
+  /** Sends a change and reads the map again; one that did not go is said at `at`. Resolves to whether it went. */
+  async function act(run: () => Promise<{ ok: boolean; error?: string }>, at: "map" | "face" | "photos") {
     setNote(null);
     const sent = await run();
-    if (!sent.ok) setNote(sent.error ?? SAY.couldNotSave);
+    if (!sent.ok) setNote({ at, text: sent.error ?? SAY.couldNotSave });
     await onChanged();
+    return sent.ok;
   }
 
   async function putFace(files: File[]) {
     const [asset] = await uploads.upload(files.slice(0, 1));
     if (!asset || !picked) return;
-    await act(() =>
-      face
-        ? writeCouple("PATCH", `/blocks/${block.id}/visits/${face.id}`, { asset })
-        : writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset, face: true }),
+    await act(
+      () =>
+        face
+          ? writeCouple("PATCH", `/blocks/${block.id}/visits/${face.id}`, { asset })
+          : writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset, face: true }),
+      "face",
     );
   }
 
   async function pin() {
     setPinning(true);
-    await act(() => writeCouple("PATCH", `/blocks/${block.id}`, { cardRegion: view }));
+    await act(() => writeCouple("PATCH", `/blocks/${block.id}`, { cardRegion: view }), "map");
     setPinning(false);
+  }
+
+  /**
+   * The face turned a quarter more inside the region's shape, the viewer left
+   * open: it had closed at every press, and half a turn was open, turn, wait
+   * for the map, open, turn. Not turned, it closes onto the line that says so.
+   */
+  async function turn() {
+    if (!face) return;
+    const next = (rotation + 90) % 360;
+    setTurned({ id: face.id, rotation: next });
+    const went = await act(() => writeCouple("PATCH", `/blocks/${block.id}/visits/${face.id}`, { rotation: next }), "face");
+    setTurned((t) => (t?.rotation === next ? null : t));
+    if (!went) setViewing(null);
   }
 
   function ask(what: Visit | "picked") {
@@ -160,7 +207,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   function drop() {
     setViewing(null);
     if (asked !== "picked") {
-      if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`));
+      if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`), asked.rep ? "face" : "photos");
       return;
     }
     if (!picking) return;
@@ -171,7 +218,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
         if (!sent.ok) return sent;
       }
       return { ok: true };
-    }).then(() => {
+    }, "photos").then(() => {
       setDropping(false);
       setPicking(null);
     });
@@ -183,21 +230,32 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
     <div>
       <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
       <div className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex items-center gap-1">
-          <NativeSelect
-            aria-label="지도 범위"
-            value={view}
-            onChange={(e) => {
-              setView(e.target.value);
-              setPicked(null);
-            }}
-          >
+        <div className="flex min-w-0 items-center gap-1">
+          <NativeSelect aria-label="지도 범위" value={view} onChange={(e) => look(e.target.value)}>
             <NativeSelectOption value="all">전국</NativeSelectOption>
             {map.provinces.map((p) => (
               <NativeSelectOption key={p.code} value={p.code}>
                 {p.name}
               </NativeSelectOption>
             ))}
+          </NativeSelect>
+          {/* Every region by name, the ones we have been to marked: the way
+              to what the map draws too small for a finger, and the map's
+              way in for a keyboard on the whole country. */}
+          <NativeSelect
+            aria-label="지역"
+            value={region && regions.includes(region) ? region.code : ""}
+            onChange={(e) => (e.target.value ? pick(e.target.value) : setPicked(null))}
+            className="max-w-44 min-w-0 shrink"
+          >
+            <NativeSelectOption value="">시/군/구</NativeSelectOption>
+            {view === "all"
+              ? map.provinces.map((p) => (
+                  <NativeSelectOptGroup key={p.code} label={p.name}>
+                    {(named.get(p.code) ?? []).map(option)}
+                  </NativeSelectOptGroup>
+                ))
+              : (named.get(view) ?? []).map(option)}
           </NativeSelect>
           <Button
             variant="ghost"
@@ -229,15 +287,16 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           marked={written}
           selected={picked}
           onSelect={pick}
+          onNear={look}
           labels={view !== "all"}
           size={view === "all" ? "thumb" : "display"}
           className="mx-auto h-auto max-h-[70dvh] w-full"
         />
       </div>
       <p className="mt-1.5 text-tiny text-faint">경계: 통계청 SGIS · vuski/admdongkor (CC BY 4.0)</p>
-      {note && !region ? (
+      {note?.at === "map" ? (
         <p role="alert" className="mt-2 text-aside text-reject">
-          {note}
+          {note.text}
         </p>
       ) : null}
 
@@ -280,6 +339,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                 </Button>
               ) : null}
             </div>
+            {note?.at === "face" || uploads.error ? (
+              <p role="alert" className="mt-2 text-aside text-reject">
+                {note?.at === "face" ? note.text : uploads.error}
+              </p>
+            ) : null}
           </div>
 
           {here.filter((v) => v !== face).length ? (
@@ -310,6 +374,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                 <PickBar count={picking.size} busy={dropping} onCancel={() => setPicking(null)} onRemove={() => ask("picked")} />
               ) : null}
             </div>
+          ) : null}
+          {note?.at === "photos" ? (
+            <p role="alert" className="mt-2 text-aside text-reject">
+              {note.text}
+            </p>
           ) : null}
 
           {records.length ? (
@@ -345,12 +414,6 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             <p className="mt-3 text-ui text-faint">{region.name}의 첫 추억을 남겨 보세요.</p>
           )}
 
-          {note || uploads.error ? (
-            <p role="alert" className="mt-2 text-aside text-reject">
-              {note ?? uploads.error}
-            </p>
-          ) : null}
-
           {viewOnly ? null : (
             <Button variant="raised" size="touch" onClick={() => setEditing("new")} className="mt-3 w-full gap-1.5">
               <Plus aria-hidden className="size-4" />
@@ -359,7 +422,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           )}
         </section>
       ) : (
-        <p className="mt-4 text-ui text-faint">{view === "all" ? "지역을 누르면 그곳의 사진과 기록이 열려요. 위에서 시/도를 고르면 가까이 봐요." : "지역을 눌러 사진과 기록을 보거나 남겨요."}</p>
+        <p className="mt-4 text-ui text-faint">
+          {view === "all"
+            ? "지역을 누르면 그곳의 사진과 기록이 열려요. 작은 곳은 누르면 그 시/도가 가까이 오고, 위에서 이름으로 골라도 돼요."
+            : "지역을 눌러 사진과 기록을 보거나 남겨요. 작은 곳은 위에서 이름으로 골라요."}
+        </p>
       )}
 
       <RecordSheet
@@ -377,34 +444,34 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
       />
       {viewing ? (
         <Lightbox
-          items={viewing.list.map((v) => ({ src: photoSrc(v.asset, "display"), title: region?.name }))}
+          // The face's line says how it is turned on the map: the photo here
+          // is the photo, and 돌리기 turns only how it fills the region.
+          items={viewing.list.map((v) => ({
+            src: photoSrc(v.asset, "display"),
+            title: v.id === face?.id && rotation ? `${region?.name ?? ""} · ${rotation}°` : region?.name,
+          }))}
           start={viewing.at}
           onClose={() => setViewing(null)}
           actions={(i) => {
             const v = viewing.list[i];
             if (!v) return null;
+            // By id: a read of the map while the viewer is open makes the
+            // face a new object, and the face had turned into one to 대표로.
+            const isFace = v.id === face?.id;
             return (
               <>
                 <SaveAction asset={v.asset} name={region?.name} />
-                {viewOnly ? null : v === face ? (
-                  // The face turned a quarter inside the region's shape.
+                {viewOnly || !isFace ? null : <ViewerAction onClick={() => void turn()}>돌리기</ViewerAction>}
+                {!isFace && picked && !viewOnly ? (
                   <ViewerAction
                     onClick={() => {
                       setViewing(null);
-                      void act(() => writeCouple("PATCH", `/blocks/${block.id}/visits/${v.id}`, { rotation: ((v.rotation ?? 0) + 90) % 360 }));
-                    }}
-                  >
-                    돌리기
-                  </ViewerAction>
-                ) : null}
-                {v !== face && picked && !viewOnly ? (
-                  <ViewerAction
-                    onClick={() => {
-                      setViewing(null);
-                      void act(() =>
-                        face
-                          ? writeCouple("PATCH", `/blocks/${block.id}/visits/${face.id}`, { asset: v.asset })
-                          : writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset: v.asset, face: true }),
+                      void act(
+                        () =>
+                          face
+                            ? writeCouple("PATCH", `/blocks/${block.id}/visits/${face.id}`, { asset: v.asset })
+                            : writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset: v.asset, face: true }),
+                        "face",
                       );
                     }}
                   >
@@ -562,7 +629,10 @@ function RecordForm({
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uploads = useUploads(block.id);
-  const ready = (!to || !from || to >= from) && !uploads.busy;
+  // An end before its start is why 저장 does not go, said under the days and
+  // on the field to change - a dimmed 저장 alone read as photos still going up.
+  const early = !!to && !!from && to < from;
+  const ready = !early && !uploads.busy;
   // The record's photos as the map read them, and those a save put on that it has not read back yet.
   const kept = [...photos, ...attached.filter((v) => !photos.some((p) => p.id === v.id))].filter((v) => !dropped.has(v.id));
   const held =
@@ -634,13 +704,41 @@ function RecordForm({
       <div className="grid grid-cols-2 gap-2">
         <Field>
           <FieldLabel htmlFor={`${id}-from`}>시작일</FieldLabel>
-          <Input id={`${id}-from`} surface="glass" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="min-w-0" />
+          <Input
+            id={`${id}-from`}
+            surface="glass"
+            type="date"
+            value={from}
+            onChange={(e) => {
+              const next = e.target.value;
+              // A start moved past the end takes the end with it, rather than
+              // leaving the record ending before it begins.
+              setTo((t) => (t && next && t < next ? next : t));
+              setFrom(next);
+            }}
+            className="min-w-0"
+          />
         </Field>
         <Field>
           <FieldLabel htmlFor={`${id}-to`}>종료일</FieldLabel>
-          <Input id={`${id}-to`} surface="glass" type="date" min={from} value={to} onChange={(e) => setTo(e.target.value)} className="min-w-0" />
+          <Input
+            id={`${id}-to`}
+            surface="glass"
+            type="date"
+            min={from}
+            value={to}
+            aria-invalid={early || undefined}
+            aria-describedby={early ? `${id}-early` : undefined}
+            onChange={(e) => setTo(e.target.value)}
+            className="min-w-0"
+          />
         </Field>
       </div>
+      {early ? (
+        <p id={`${id}-early`} role="alert" className="-mt-2 text-aside text-reject">
+          종료일이 시작일보다 일러요.
+        </p>
+      ) : null}
       <Field>
         <FieldLabel>사진</FieldLabel>
         <PhotoTiles

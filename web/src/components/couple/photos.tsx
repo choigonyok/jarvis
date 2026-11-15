@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Check, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { photoSrc, uploadEach, uploadPhoto } from "@/lib/couple";
@@ -13,22 +13,46 @@ import { cn } from "@/lib/utils";
  * got; a photo that did not go says why beside the button that sent it.
  */
 
+/**
+ * An upload under way: which photo of how many and, with several, the way to
+ * stop it before the next - thirty going up one by one had nothing to do but
+ * wait for the last.
+ */
+export type Uploading = { done: number; of: number; stop?: () => void; stopping?: boolean };
+
+/** A stop for one upload: the signal its loop reads, and the press that says it is stopping. */
+export function stopper<B extends Uploading>(setBusy: Dispatch<SetStateAction<B | null>>) {
+  const halt = new AbortController();
+  const stop = () => {
+    halt.abort();
+    setBusy((b) => b && { ...b, stopping: true });
+  };
+  return { signal: halt.signal, stop };
+}
+
 /** Uploads photos one after another for a block, saying how far it got. */
 export function useUploads(block: string | null) {
-  const [busy, setBusy] = useState<{ done: number; of: number } | null>(null);
+  const [busy, setBusy] = useState<Uploading | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  /** Resolves to the assets that went up, in order; how many of the rest did not, and why, is said beside the button. */
+  /**
+   * Resolves to the assets that went up, in order - all of them, or those
+   * before a stop; how many of the rest did not, and why, is said beside the
+   * button.
+   */
   async function upload(files: File[]): Promise<string[]> {
     if (!block || files.length === 0) return [];
     setError(null);
-    const { up, missed, why } = await uploadEach(
+    const { signal, stop } = stopper(setBusy);
+    const { up, missed, why, stopped } = await uploadEach(
       files,
       (file) => uploadPhoto(block, file),
-      (done) => setBusy({ done, of: files.length }),
+      (done) => setBusy({ done, of: files.length, stop }),
+      signal,
     );
     // "3번째 사진" was a place in the phone's picker, which no one can go back to.
-    if (missed) setError(files.length > 1 ? `${files.length}장 중 ${missed}장은 올리지 못했어요: ${why}` : why);
+    const tried = files.length - stopped;
+    if (missed) setError(tried > 1 ? `${tried}장 중 ${missed}장은 올리지 못했어요: ${why}` : why);
     setBusy(null);
     return up;
   }
@@ -48,8 +72,8 @@ export function PickPhotos({
   icon,
 }: {
   onPick: (files: File[]) => void;
-  /** This button's own upload under way: it counts it. */
-  busy?: { done: number; of: number } | null;
+  /** This button's own upload under way: it counts it, and beside it is the way to stop it. */
+  busy?: Uploading | null;
   /** Held while something else is under way beside it - another button's upload, a removal - which it does not count. */
   disabled?: boolean;
   label?: string;
@@ -82,6 +106,13 @@ export function PickPhotos({
         {icon ?? <ImagePlus aria-hidden className="size-4" />}
         {busy ? `올리는 중… ${busy.done + 1}/${busy.of}` : label}
       </Button>
+      {/* Stops before the next photo: the one going up finishes, and what
+          went up stays. Nothing is left to stop once the last is going. */}
+      {busy?.stop && busy.of > 1 ? (
+        <Button type="button" variant="quiet" size="touch-sm" onClick={busy.stop} disabled={busy.stopping || busy.done + 1 >= busy.of}>
+          {busy.stopping ? "멈추는 중…" : "멈추기"}
+        </Button>
+      ) : null}
     </>
   );
 }
@@ -173,12 +204,26 @@ export function PhotoTiles({
 }
 
 /** A button on the dark photo viewer's top bar. */
-export function ViewerAction({ onClick, children, danger, disabled }: { onClick: () => void; children: ReactNode; danger?: boolean; disabled?: boolean }) {
+export function ViewerAction({
+  onClick,
+  children,
+  danger,
+  disabled,
+  busy,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Not ready yet, rather than not to be had: what it needs is on its way. */
+  busy?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-busy={busy || undefined}
       className={cn(
         "flex h-11 items-center rounded-lg px-3 text-ui outline-none focus-visible:ring-3 focus-visible:ring-white/50 disabled:opacity-40",
         danger ? "text-[oklch(0.75_0.15_25)]" : "text-white",
@@ -197,7 +242,16 @@ export function ViewerAction({ onClick, children, danger, disabled }: { onClick:
  */
 export function SaveAction({ asset, name }: { asset: string; name?: string }) {
   const [file, setFile] = useState<{ asset: string; file: File } | null>(null);
+  // This photo's file did not come. The viewer keeps the button as it moves
+  // on, so the failure is let go with the photo - one that did not come had
+  // left 저장 못 함 on every photo after it - and pressed, it asks again.
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [was, setWas] = useState(asset);
+  if (was !== asset) {
+    setWas(asset);
+    setFailed(false);
+  }
   useEffect(() => {
     let live = true;
     fetch(photoSrc(asset, "display"))
@@ -211,10 +265,16 @@ export function SaveAction({ asset, name }: { asset: string; name?: string }) {
     return () => {
       live = false;
     };
-  }, [asset, name]);
+  }, [asset, name, attempt]);
   const ready = file?.asset === asset ? file.file : null;
+  const missed = failed && !ready;
 
   function save() {
+    if (missed) {
+      setFailed(false);
+      setAttempt((n) => n + 1);
+      return;
+    }
     if (!ready) return;
     if (navigator.canShare?.({ files: [ready] })) {
       navigator.share({ files: [ready] }).catch(() => undefined);
@@ -231,8 +291,8 @@ export function SaveAction({ asset, name }: { asset: string; name?: string }) {
   }
 
   return (
-    <ViewerAction onClick={save} disabled={!ready}>
-      {failed ? "저장 못 함" : "저장"}
+    <ViewerAction onClick={save} disabled={!ready && !missed} busy={!ready && !missed}>
+      {missed ? "다시 받기" : "저장"}
     </ViewerAction>
   );
 }

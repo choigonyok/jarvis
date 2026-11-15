@@ -40,7 +40,10 @@ function reason(w: Watch): string {
 /**
  * The mode at the end of a person's line, today: a quiet word - or, when the
  * battery keeps the phone out of Move, a red battery and its level, the way
- * the phone itself shows a battery under 20%. A tap says why.
+ * the phone itself shows a battery under 20%. A tap says why. The word is
+ * small, not what takes the tap: a band 44px high and at least as wide, so
+ * a thumb that misses it does not land on the strip under it and move the
+ * time.
  */
 export function ModeTag({ watch, onOpen }: { watch?: Watch; onOpen: () => void }) {
   if (!watch) return null;
@@ -51,7 +54,7 @@ export function ModeTag({ watch, onOpen }: { watch?: Watch; onOpen: () => void }
       onClick={onOpen}
       aria-label={`${label} - 이유 보기`}
       title={label}
-      className="-my-1 ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-meta text-faint transition-colors hover:text-foreground focus-ring"
+      className="tap-y -my-1 ml-auto flex min-w-11 shrink-0 items-center justify-end gap-1 rounded-md px-1.5 py-1 text-meta text-faint transition-colors hover:text-foreground focus-ring"
     >
       {watch.downgraded ? (
         <>

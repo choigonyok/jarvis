@@ -2,7 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
 import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
@@ -480,20 +480,7 @@ function Viewer({
               <Arrow label="전날" disabled={date <= first} onClick={() => onDate(shiftDay(date, -1))}>
                 <ChevronLeft aria-hidden className="size-[18px]" strokeWidth={1.8} />
               </Arrow>
-              <label className="relative flex min-h-11 items-center rounded-lg px-1 text-body text-ink focus-within:ring-3 focus-within:ring-ring/50">
-                {dateLabel(date)}
-                <input
-                  type="date"
-                  aria-label="날짜 고르기"
-                  min={first}
-                  max={today}
-                  value={date}
-                  onChange={(e) => e.target.value && onDate(e.target.value)}
-                  // A click on the hidden field itself opens no calendar on a desktop browser.
-                  onClick={(e) => e.currentTarget.showPicker?.()}
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                />
-              </label>
+              <DayPick date={date} first={first} today={today} onDate={onDate} />
               <Arrow label="다음 날" disabled={date >= today} onClick={() => onDate(shiftDay(date, 1))}>
                 <ChevronRight aria-hidden className="size-[18px]" strokeWidth={1.8} />
               </Arrow>
@@ -622,21 +609,25 @@ function Viewer({
  * phones watch.
  */
 function PlaceButtons({ onExplain, onRegister }: { onExplain: () => void; onRegister: () => void }) {
+  // A thumb's 44px each on a phone: ⓘ fills the capsule's height (it has no
+  // ground of its own, so it looks as it did), and 위치 등록 takes a band
+  // that tall - 36px side by side, a miss on ⓘ was a 위치 등록 and the
+  // phone asking for its location.
   return (
-    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_var(--shade)]">
+    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-popover pe-1 shadow-[0_6px_16px_-6px_var(--shade)] mouse:p-1">
       <button
         type="button"
         onClick={onExplain}
         aria-label="위치 등록과 모드 설명"
         title="위치 등록과 모드"
-        className="flex size-9 items-center justify-center rounded-full text-dim transition-colors hover:text-foreground focus-ring mouse:size-7"
+        className="flex size-11 items-center justify-center rounded-full text-dim transition-colors hover:text-foreground focus-ring mouse:size-7"
       >
         <Info aria-hidden className="size-[17px]" strokeWidth={1.8} />
       </button>
       <button
         type="button"
         onClick={onRegister}
-        className="flex h-9 items-center gap-1.5 rounded-full bg-glass-raised pr-3.5 pl-3 text-aside text-foreground transition-colors hover:bg-foreground/15 focus-ring mouse:h-7"
+        className="tap-y flex h-9 items-center gap-1.5 rounded-full bg-glass-raised pr-3.5 pl-3 text-aside text-foreground transition-colors hover:bg-foreground/15 focus-ring mouse:h-7"
       >
         <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
         위치 등록
@@ -680,6 +671,74 @@ function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void })
 function earliest(scene: Scene, today: string): string {
   const keep = shiftDay(today, -(scene.keepDays - 1));
   return scene.since && scene.since > keep ? scene.since : keep;
+}
+
+/**
+ * The day shown, and the way to any day kept: pressed, the phone's own date
+ * picker, the word marked with ▾ as something that opens - only the arrows
+ * beside it had looked pressable. A day out of the kept range stops at its
+ * end: min and max bind only a calendar, not a wheel or what is typed.
+ *
+ * Reached by the keyboard, the field itself shows, so what the arrow keys
+ * change is seen, and what is typed is held until Enter or leaving it: each
+ * key had read a day, and a field put back to the range under a half-typed
+ * month lost the digit typed.
+ */
+function DayPick({ date, first, today, onDate }: { date: string; first: string; today: string; onDate: (d: string) => void }) {
+  // What the shown field holds; null while it is hidden under the words.
+  const [typed, setTyped] = useState<string | null>(null);
+  const pointed = useRef(false);
+  const kept = (v: string) => (v < first ? first : v > today ? today : v);
+  /** The day typed, gone to; true when there was one to go to. */
+  function go() {
+    if (!typed) return false;
+    const day = kept(typed);
+    if (day !== date) onDate(day);
+    setTyped(day);
+    return true;
+  }
+  return (
+    <label
+      onPointerDown={() => {
+        pointed.current = true;
+      }}
+      className="relative flex min-h-11 items-center gap-1 rounded-lg px-1 text-body text-ink focus-within:ring-3 focus-within:ring-ring/50"
+    >
+      {typed === null ? (
+        <>
+          {dateLabel(date)}
+          <ChevronDown aria-hidden className="size-3.5 text-faint" />
+        </>
+      ) : null}
+      <input
+        type="date"
+        aria-label="날짜 고르기"
+        min={first}
+        max={today}
+        value={typed ?? date}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (typed !== null) setTyped(v);
+          else if (v) onDate(kept(v));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && go()) e.preventDefault();
+        }}
+        // A click on the hidden field itself opens no calendar on a desktop browser.
+        onClick={(e) => e.currentTarget.showPicker?.()}
+        onFocus={() => {
+          if (!pointed.current) setTyped(date);
+          pointed.current = false;
+        }}
+        onBlur={() => {
+          go();
+          setTyped(null);
+          pointed.current = false;
+        }}
+        className={typed === null ? "absolute inset-0 cursor-pointer opacity-0" : "bg-transparent outline-none"}
+      />
+    </label>
+  );
 }
 
 function Arrow({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {

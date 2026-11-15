@@ -290,18 +290,25 @@ export async function uploadSized(block: string, file: File): Promise<Sent<{ ass
  * Photos uploaded one after another, saying which is going up. One that does
  * not go - a photo the browser cannot read - no longer stops the ones after
  * it; a dropped line still does, as every one after it would fail the same
- * way, each after its own wait. Resolves to what went up, how many did not
- * and why.
+ * way, each after its own wait. Stopped by hand (stop), it stops before the
+ * next one: the one going up finishes, and what went up is kept. Resolves to
+ * what went up, how many did not and why, and how many the stop held back.
  */
 export async function uploadEach<T>(
   files: File[],
   send: (file: File) => Promise<Sent<T>>,
   onNext: (done: number) => void,
-): Promise<{ up: T[]; missed: number; why: string }> {
+  stop?: AbortSignal,
+): Promise<{ up: T[]; missed: number; why: string; stopped: number }> {
   const up: T[] = [];
   const why = new Set<string>();
   let missed = 0;
+  let stopped = 0;
   for (let i = 0; i < files.length; i++) {
+    if (stop?.aborted) {
+      stopped = files.length - i;
+      break;
+    }
     onNext(i);
     const sent = await send(files[i]);
     if (sent.ok) {
@@ -315,7 +322,7 @@ export async function uploadEach<T>(
     }
     missed += 1;
   }
-  return { up, missed, why: [...why].join(" ") };
+  return { up, missed, why: [...why].join(" "), stopped };
 }
 
 /**

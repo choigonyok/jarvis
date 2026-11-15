@@ -330,12 +330,13 @@ export function DayMap({
           <Maximize2 aria-hidden className="size-4" strokeWidth={1.8} />
         </button>
       ) : null}
+      {/* The words stay small; what takes a press is taller than them. */}
       <p className="absolute bottom-1.5 left-2.5 text-tiny text-faint">
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="hover:text-dim">
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="py-2 hover:text-dim">
           © OpenStreetMap
         </a>
         {" · "}
-        <a href="https://openfreemap.org" target="_blank" rel="noreferrer" className="hover:text-dim">
+        <a href="https://openfreemap.org" target="_blank" rel="noreferrer" className="py-2 hover:text-dim">
           OpenFreeMap
         </a>
       </p>
