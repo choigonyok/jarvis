@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
@@ -88,26 +90,58 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
 
 /**
  * One reminder, in the job row's grain: what is said, what came of it on the
- * right, and the moment - or when it was said and why not - beneath.
+ * right, and the moment - or when it was said and why not - beneath. Two
+ * lines of it are the row; the row opens the whole of it, and of one still
+ * waiting, where it is changed or called off - the conversation.
  */
 function ReminderRow({ reminder: r }: { reminder: Reminder }) {
   const live = waiting(r);
   const result = outcome(r);
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex items-start gap-1 py-1.5 pl-2">
-      <div className="min-w-0 flex-1 py-1.5">
-        <div className="flex items-baseline gap-2">
-          <p className={cn("line-clamp-2 min-w-0 text-body break-words", live ? "text-ink" : "text-dim")}>
+    <div className="flex items-start gap-1">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="min-w-0 flex-1 rounded-lg py-3 pl-2 text-left transition-colors hover:bg-glass focus-ring"
+      >
+        <span className="flex items-baseline gap-2">
+          <span className={cn("line-clamp-2 min-w-0 text-body break-words", live ? "text-ink" : "text-dim")}>
             {r.text}
-          </p>
+          </span>
           {result ? <span className={cn("ms-auto shrink-0 text-aside", outcomeTone(r))}>{result}</span> : null}
-        </div>
+        </span>
         {live && r.body ? (
-          <p className="mt-1 line-clamp-2 text-aside whitespace-pre-line break-words text-dim">{r.body}</p>
+          <span className="mt-1 line-clamp-2 block text-aside whitespace-pre-line break-words text-dim">{r.body}</span>
         ) : null}
-        <p className={cn("tnum mt-1 text-meta break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</p>
-      </div>
-      <CopyButton text={[r.text, r.body].filter(Boolean).join("\n")} label={`${r.text} 복사`} />
+        <span className={cn("tnum mt-1 block text-meta break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</span>
+      </button>
+      <CopyButton text={[r.text, r.body].filter(Boolean).join("\n")} label={`${r.text} 복사`} className="mt-1.5" />
+      <DetailSheet title="리마인드" open={open} onOpenChange={setOpen}>
+        <p className="selectable text-body leading-relaxed whitespace-pre-line break-words text-ink">{r.text}</p>
+        {r.body ? (
+          <p className="selectable mt-2 text-ui leading-relaxed whitespace-pre-line break-words text-dim">{r.body}</p>
+        ) : null}
+        <p className="tnum mt-3 text-aside break-words text-dim">
+          {detail(r)}
+          {result ? (
+            <>
+              {" · "}
+              <span className={outcomeTone(r)}>{result}</span>
+            </>
+          ) : null}
+        </p>
+        {live ? (
+          <div className="mt-6">
+            <p className="text-aside leading-relaxed text-faint">바꾸거나 취소하려면 대화에서 말해 주세요.</p>
+            <Button variant="soft" size="touch-sm" asChild className="mt-2">
+              <Link href="/">대화로 가기</Link>
+            </Button>
+          </div>
+        ) : null}
+      </DetailSheet>
     </div>
   );
 }

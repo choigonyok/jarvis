@@ -61,7 +61,12 @@ export type BlockedSite = { site: string; loginRequired: boolean; note?: string;
 
 export const LIVE: JobState[] = ["active", "waiting", "paused"];
 
-/** What a job is doing, in the words the tab shows. */
+/**
+ * What a job is doing, in the words the tab shows. Paused, it rests as a goal
+ * does (잠깐 쉬기 · 쉬는 중 · 다시 시작): 멈추기 beside 그만두기 read as two
+ * ways to stop for good, and 멈추기 in the conversation stops an answer. A
+ * failure is said as one, not as a kind of pause.
+ */
 export function stateLabel(j: Job): string {
   if (j.running) return "진행 중";
   if (j.blockedSites?.length) return "로그인 대기";
@@ -71,19 +76,25 @@ export function stateLabel(j: Job): string {
     case "waiting":
       return "승인 대기";
     case "paused":
-      return "멈춤";
+      return "쉬는 중";
     case "done":
       return "끝남";
     case "cancelled":
       return "그만둠";
     case "failed":
-      return "멈춤(실패)";
+      return "실패";
   }
+}
+
+/** Live and held until its person answers a card or logs in again: the one thing the tab asks of anyone. */
+export function waitsOnPerson(j: Job): boolean {
+  return !j.running && LIVE.includes(j.state) && (j.state === "waiting" || Boolean(j.blockedSites?.length));
 }
 
 export function stateTone(j: Job): string {
   if (j.running) return "text-approve";
-  // Waiting on the operator is not the calendar's violet: the row carries the breathing ring.
+  // Waiting on the operator is not the calendar's violet: the row carries the
+  // breathing dot a waiting card has (waitsOnPerson).
   if (j.blockedSites?.length || j.state === "waiting") return "text-ink";
   if (j.state === "failed") return "text-reject";
   if (j.state === "active") return "text-dim";

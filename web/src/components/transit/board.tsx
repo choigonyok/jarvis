@@ -38,30 +38,38 @@ function Rail({ who, plan, route, now }: { who: Who; plan: Plan; route: Route; n
   const left = 14;
   const right = W - 24;
   const ground = 36;
+  const vehicle = route.stop.kind === "subway" ? TRAIN : BUS;
+  const vehicleX = right - 2 - vehicle[0].length * 2.5 - 6;
   const board = plan.catch ? Date.parse(plan.catch.at) : NaN;
   const leave = plan.leave ? Date.parse(plan.leave) : NaN;
   const known = Number.isFinite(board) && Number.isFinite(leave);
   const start = known ? leave - 20 * 60_000 : 0;
-  const span = known ? board - start : 1;
-  const xOf = (t: number) => left + ((right - left) * Math.min(Math.max(t - start, 0), span)) / span;
-  const flagX = known ? xOf(leave) : left + (right - left) * 0.65;
+  // The walk's share of the track is the walk's share of the time - until a
+  // stop a few minutes away put the flag on the vehicle and the two times
+  // under it on each other. The flag stops short of the vehicle and the walk
+  // takes the rest of the track, its minutes ruled wider.
+  const even = known ? left + ((right - left) * (leave - start)) / (board - start) : 0;
+  const flagX = known ? Math.min(even, vehicleX - 16) : left + (right - left) * 0.65;
+  const xOf = (t: number) => {
+    if (t <= leave) return left + ((flagX - left) * Math.max(t - start, 0)) / (leave - start);
+    return board > leave ? flagX + ((right - flagX) * Math.min(t - leave, board - leave)) / (board - leave) : right;
+  };
   const meX = known ? xOf(now) : left;
-  const minutes = Math.round(span / 60_000);
+  const minutes = known ? Math.round((board - start) / 60_000) : 0;
   const ticks = known ? Array.from({ length: minutes + 1 }, (_, i) => i) : [];
-  const vehicle = route.stop.kind === "subway" ? TRAIN : BUS;
   return (
     <div className="relative">
       <svg viewBox={`0 0 ${W} ${H}`} className="block w-full overflow-visible" role="img" aria-label={known ? `${clockOf(plan.leave!)}에 나가서 ${clockOf(plan.catch!.at)}에 타요` : "도착 정보 없음"}>
         {/* The track, ruled by the minute; every fifth a little taller. */}
         <line x1={0} x2={W} y1={ground} y2={ground} className="stroke-foreground/45" strokeWidth={1.5} />
         {ticks.map((i) => {
-          const x = left + ((right - left) * i * 60_000) / span;
+          const x = xOf(start + i * 60_000);
           return <line key={i} x1={x} x2={x} y1={ground} y2={ground + (i % 5 === 0 ? 6 : 3)} className="stroke-foreground/35" strokeWidth={1.2} />;
         })}
         {/* When to leave, and where it is boarded. */}
         <Pixels rows={FLAG} cell={2.5} x={flagX - 1.25} y={ground - 20} className={cn("fill-mine", plan.stage === "go" && "anim-breathe")} />
         <Pixels rows={SIGN} cell={2.5} x={right - 2} y={ground - 25} className="fill-mine" />
-        <Pixels rows={vehicle} cell={2.5} x={right - 2 - vehicle[0].length * 2.5 - 6} y={ground - 18} className={cn(known ? "fill-foreground/80" : "fill-foreground/25")} />
+        <Pixels rows={vehicle} cell={2.5} x={vehicleX} y={ground - 18} className={cn(known ? "fill-foreground/80" : "fill-foreground/25")} />
       </svg>
       {/* Now: one's own face, walking the track. */}
       {/* eslint-disable-next-line @next/next/no-img-element -- a 26px icon from public/, nothing to optimise */}
@@ -88,11 +96,16 @@ function Rail({ who, plan, route, now }: { who: Who; plan: Plan; route: Route; n
   );
 }
 
-/** Room on a bus: the empty seats where they are counted, else how full it is. */
+/**
+ * Room on a bus: the empty seats where they are counted, else how full it is.
+ * Red on this board is being late, so a full bus is said in words, standing
+ * out of its row - a next bus's "만석" in red read as having to run.
+ */
 function Room({ arrival }: { arrival: Arrival }) {
   const { seats, crowd } = arrival;
+  const full = "font-medium text-foreground";
   if (seats != null) {
-    if (seats === 0) return <span className="text-reject">만석</span>;
+    if (seats === 0) return <span className={full}>만석</span>;
     return (
       <>
         빈자리 <span className="font-score text-[19px] leading-none font-semibold">{seats}</span>
@@ -100,7 +113,7 @@ function Room({ arrival }: { arrival: Arrival }) {
     );
   }
   if (!crowd) return null;
-  return <span className={crowd === "만차" || crowd === "매우혼잡" ? "text-reject" : undefined}>{crowd}</span>;
+  return <span className={crowd === "만차" || crowd === "매우혼잡" ? full : undefined}>{crowd}</span>;
 }
 
 /**
@@ -160,11 +173,13 @@ export function Board({ who, route, plan, now, stale }: { who: Who; route: Route
   const late = stage === "run";
   const pastGood = live !== null && now > leave;
   const shown: Plan = plan ? { ...plan, stage } : { route: route.id, now: "", next: [], stage: "off", say };
+  // Past the good time, the count is a length - how long is left - so the
+  // words say the moment it runs to: "이때까지" under a length read as a time.
   const caption = live
     ? late
       ? "나갔어야 할 때가 지났어요"
-      : pastGood
-        ? "늦어도 이때까지 나가야 해요"
+      : pastGood && plan?.last
+        ? `늦어도 ${clockOf(plan.last)}까지 나가야 해요`
         : "나갈 때까지"
     : plan?.error
       ? plan.error

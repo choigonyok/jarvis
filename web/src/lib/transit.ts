@@ -8,6 +8,7 @@
 import { SAY } from "@/lib/say";
 import type { Who } from "@/lib/track";
 import { HttpError } from "@/lib/use-resource";
+import { clock, dayOf, shiftDay } from "@/lib/when";
 
 export type StopKind = "bus" | "subway";
 
@@ -164,6 +165,31 @@ export function countdown(ms: number): string {
 }
 
 export const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];
+
+/**
+ * Whether a route is gone at `at`: on one of its days, inside its hours -
+ * past midnight when they run over it, the day being the one they began -
+ * as the service decides it for the nudges (context-svc Route.Active), on
+ * Seoul's clock. A route without hours never is.
+ */
+export function active(r: Route, at: Date): boolean {
+  const from = minutesOf(r.from);
+  const to = minutesOf(r.to);
+  if (from === null || to === null) return false;
+  const [h, m] = clock(at.toISOString()).split(":").map(Number);
+  const now = (h % 24) * 60 + m;
+  const day = to < from && now < to ? shiftDay(dayOf(at), -1) : dayOf(at);
+  const [y, mo, d] = day.split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, mo - 1, d)).getUTCDay() || 7;
+  if (r.days?.length && !r.days.includes(weekday)) return false;
+  return to < from ? now >= from || now < to : now >= from && now < to;
+}
+
+/** "07:30" as minutes into the day; null for anything else. */
+function minutesOf(hm: string | undefined): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(hm ?? "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
 
 /** The words for a stage, said again on the client as time passes between reads. */
 export function stageOf(leaveMs: number, nowMs: number, lastMs = leaveMs): { stage: Stage; say: string } {

@@ -13,15 +13,17 @@ import { RouteEditor } from "@/components/transit/route-editor";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useKept } from "@/lib/keep";
+import { onShown } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import type { Who } from "@/lib/track";
-import { type Departures as Read, type Plan, type Route, clockOf, readDepartures, saveRoutes, stageOf } from "@/lib/transit";
+import { type Departures as Read, type Plan, type Route, active, clockOf, readDepartures, saveRoutes, stageOf } from "@/lib/transit";
 import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { failureText, SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
-/** The route a person last looked at, in their own browser. */
+/** The route a person last picked, in their own browser. */
 const PICK_KEY = "jarvis:transit-route";
 
 /**
@@ -56,6 +58,15 @@ export function Departures() {
       return null;
     }
   });
+  // The route pressed while looking, and the hours it was pressed in: it
+  // holds - across a tab switch too - while those hours stand, and gives way
+  // when others come.
+  const [chosen, setChosen] = useKept<{ id: string; under: string } | null>("transit:chosen", null);
+  // When this look began - opening the screen, or coming back to the app -
+  // which the hours are read at, so the board does not change routes under
+  // one's eyes as an hour ends.
+  const [lookedAt, setLookedAt] = useState(() => Date.now());
+  useEffect(() => onShown(() => setLookedAt(Date.now())), []);
   const [editing, setEditing] = useState<Route | null | undefined>(undefined);
 
   // The countdown moves every second.
@@ -69,33 +80,39 @@ export function Departures() {
   // someone may run for a bus that is no longer coming.
   const stale = read !== null && (departures.error !== null || now - (departures.readAt?.getTime() ?? now) > 60_000);
 
+  const routes = useMemo(() => read?.routes ?? [], [read]);
+  const planOf = useMemo(() => new Map((read?.plans ?? []).map((p) => [p.route, p])), [read]);
+  // The routes whose days and hours this look falls in. The one remembered
+  // was the board all day once pressed: 출근 at six in the evening, with 퇴근
+  // a press away.
+  const inHours = useMemo(() => inHoursAt(routes, lookedAt), [routes, lookedAt]);
+  const hours = keyOf(inHours);
+  // The board: the route pressed while these hours stand; else the one they
+  // are the hours of (of several, the one to leave for soonest); else the one
+  // last picked in this browser; else the one to leave for soonest.
+  const current = useMemo(() => {
+    if (!routes.length) return null;
+    const byId = (id: string | null | undefined) => routes.find((r) => r.id === id);
+    const held = chosen?.under === hours ? byId(chosen.id) : undefined;
+    return held ?? soonestOf(inHours, planOf) ?? inHours[0] ?? byId(picked) ?? soonestOf(routes, planOf) ?? routes[0];
+  }, [routes, chosen, hours, inHours, picked, planOf]);
+
   function pick(id: string) {
+    setChosen({ id, under: hours });
     setPicked(id);
     try {
       localStorage.setItem(PICK_KEY, id);
     } catch {}
   }
 
-  const routes = useMemo(() => read?.routes ?? [], [read]);
-  const planOf = useMemo(() => new Map((read?.plans ?? []).map((p) => [p.route, p])), [read]);
-  // The board: the route one picked, else the one to leave for soonest.
-  const current = useMemo(() => {
-    if (!routes.length) return null;
-    const chosen = routes.find((r) => r.id === picked);
-    if (chosen) return chosen;
-    const soonest = [...routes]
-      .filter((r) => planOf.get(r.id)?.leave)
-      .sort((a, b) => Date.parse(planOf.get(a.id)!.leave!) - Date.parse(planOf.get(b.id)!.leave!))[0];
-    return soonest ?? routes[0];
-  }, [routes, picked, planOf]);
-
   async function keep(next: Route[]) {
     const adding = editing === null;
     const saved = await saveRoutes(who, next);
     setEditing(undefined);
     departures.mutate((r) => (r ? { ...r, routes: saved } : r));
-    // A route just added is what one wants to see.
-    if (adding && saved.length) pick(saved[saved.length - 1].id);
+    // A route just added is what one wants to see - now, not remembered over
+    // the one picked.
+    if (adding && saved.length) setChosen({ id: saved[saved.length - 1].id, under: keyOf(inHoursAt(saved, lookedAt)) });
     void load();
   }
 
@@ -113,7 +130,7 @@ export function Departures() {
                 {error}
               </Failed>
             ) : (
-              <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
+              <Placeholder />
             )
           ) : routes.length === 0 ? (
             <NoRoutes onAdd={() => setEditing(null)} />
@@ -139,7 +156,7 @@ export function Departures() {
                   </TabsContent>
                 ) : null}
               </Tabs>
-              {!read.feeds.buses || !read.feeds.subway ? <Keys feeds={read.feeds} /> : null}
+              <Keys feeds={read.feeds} routes={routes} owner={who === "owner"} />
 
               <section className="mt-10" aria-label="내 경로">
                 <h2 className="mb-1 text-ui font-medium text-foreground">내 경로</h2>
@@ -151,7 +168,11 @@ export function Departures() {
                         onClick={() => pick(r.id)}
                         className="flex min-w-0 flex-1 items-baseline gap-3 py-3 text-left focus-ring"
                       >
-                        <span className={cn("w-12 shrink-0 text-body", current?.id === r.id ? "text-foreground" : "text-ink")}>{r.name}</span>
+                        {/* Short names line up at 48px; a long one (up to twenty
+                            letters) ends in "…" instead of folding into a tall column. */}
+                        <span className={cn("max-w-[40%] min-w-12 shrink-0 truncate text-body", current?.id === r.id ? "text-foreground" : "text-ink")}>
+                          {r.name}
+                        </span>
                         <span className="min-w-0 flex-1 truncate text-aside text-dim">
                           {r.stop.name} · {r.line.name}
                           {r.from ? ` · ${r.from}–${r.to}${r.push ? " 알림" : ""}` : ""}
@@ -169,15 +190,19 @@ export function Departures() {
                     </li>
                   ))}
                 </ul>
-                <button
-                  type="button"
-                  onClick={() => setEditing(null)}
-                  disabled={routes.length >= 12}
-                  className="mt-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-1 text-ui text-dim hover:text-foreground focus-ring disabled:opacity-40 mouse:h-9"
-                >
-                  <Plus aria-hidden className="size-4" strokeWidth={1.8} />
-                  경로 추가
-                </button>
+                {/* At the most, said - a greyed button did not say why. */}
+                {routes.length >= 12 ? (
+                  <p className="mt-3 px-1 text-aside text-faint">경로는 12개까지 둘 수 있어요.</p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(null)}
+                    className="mt-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-1 text-ui text-dim hover:text-foreground focus-ring mouse:h-9"
+                  >
+                    <Plus aria-hidden className="size-4" strokeWidth={1.8} />
+                    경로 추가
+                  </button>
+                )}
               </section>
             </>
           )}
@@ -197,6 +222,22 @@ export function Departures() {
   );
 }
 
+/** The routes whose days and hours a moment falls in. */
+function inHoursAt(routes: Route[], at: number): Route[] {
+  const when = new Date(at);
+  return routes.filter((r) => active(r, when));
+}
+
+/** Which routes' hours stand: a press is held under it. */
+const keyOf = (list: Route[]) => list.map((r) => r.id).join(" ");
+
+/** Of these routes, the one to leave for soonest; none when none has a time to leave. */
+function soonestOf(list: Route[], planOf: Map<string, Plan>): Route | undefined {
+  return [...list]
+    .filter((r) => planOf.get(r.id)?.leave)
+    .sort((a, b) => Date.parse(planOf.get(a.id)!.leave!) - Date.parse(planOf.get(b.id)!.leave!))[0];
+}
+
 /** A route's line in the list: when to leave, as the clock goes on. */
 function status(plan: Plan | undefined, now: number): string {
   if (!plan) return "";
@@ -208,6 +249,34 @@ function status(plan: Plan | undefined, now: number): string {
   if (stage === "run") return "지금 뛰기";
   const min = Math.round((leave - now) / 60_000);
   return min <= 0 ? "지금 나가기" : `${clockOf(plan.leave)} 나가기`;
+}
+
+/**
+ * The board while it is read: still blocks of the face and its words, the
+ * count, the rail and the line to catch - what comes arrives into them.
+ */
+function Placeholder() {
+  return (
+    <div className="pt-1">
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="flex items-start gap-3">
+          <span className="mt-1 size-10 shrink-0 rounded-full bg-well" />
+          <span className="h-11 w-44 rounded-[12px] bg-well" />
+        </div>
+        <div className="mt-4 h-20 w-52 rounded-lg bg-well" />
+        <div className="mt-2 h-4 w-24 rounded bg-well" />
+        <div className="mt-6 h-14 rounded-lg bg-well" />
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span className="h-6 w-44 rounded bg-well" />
+          <span className="h-4 w-16 rounded bg-well" />
+        </div>
+        <div className="mt-1.5 h-3.5 w-32 rounded bg-well" />
+      </div>
+    </div>
+  );
 }
 
 function NoRoutes({ onAdd }: { onAdd: () => void }) {
@@ -227,12 +296,24 @@ function NoRoutes({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-/** Which live feed has no key yet - said once, under the board. */
-function Keys({ feeds }: { feeds: { buses: boolean; subway: boolean } }) {
-  const missing = [!feeds.buses && "버스", !feeds.subway && "지하철"].filter(Boolean).join("·");
+/**
+ * Which live feed has no key yet, of the kinds one's routes take - said once,
+ * under the board. Where the key goes is the operator's to know; the guest,
+ * who can do nothing about it, hears only that it is not connected yet.
+ */
+function Keys({ feeds, routes, owner }: { feeds: { buses: boolean; subway: boolean }; routes: Route[]; owner: boolean }) {
+  const missing = [
+    !feeds.buses && routes.some((r) => r.stop.kind === "bus") && "버스",
+    !feeds.subway && routes.some((r) => r.stop.kind === "subway") && "지하철",
+  ]
+    .filter(Boolean)
+    .join("·");
+  if (!missing) return null;
   return (
     <p className="mt-6 text-aside leading-[1.55] break-keep text-faint">
-      {missing} 실시간 정보 키가 아직 없어 그 경로는 시각을 세지 못해요. 키를 맥미니에 넣으면 바로 이어져요.
+      {owner
+        ? `${missing} 실시간 정보 키가 아직 없어 그 경로는 시각을 세지 못해요. 키를 맥미니에 넣으면 바로 이어져요.`
+        : `${missing} 실시간 정보가 아직 연결되지 않아 그 경로는 시각을 세지 못해요.`}
     </p>
   );
 }

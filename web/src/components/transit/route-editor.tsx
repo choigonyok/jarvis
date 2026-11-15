@@ -1,7 +1,7 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
-import { BusFront, LocateFixed, Minus, Plus, Search, TrainFront } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { BusFront, LocateFixed, Search, TrainFront } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Stepper } from "@/components/goals/stepper";
 import { Failed } from "@/components/shell/failed";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { failureText, SAY } from "@/lib/say";
 import type { Who } from "@/lib/track";
 import { DAY_NAMES, type Line, type Route, type Stop, findLines, findStops, walkMinutes } from "@/lib/transit";
+import { HttpError } from "@/lib/use-resource";
 
 const NAMES = ["출근", "퇴근", "학원"];
 
@@ -163,6 +165,15 @@ function Form({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missed, setMissed] = useState<string | null>(null);
+  // 경로 저장 pressed with no name: asked for where names are chosen. A greyed
+  // button said nothing, and from the foot of a long sheet the names were
+  // out of sight.
+  const [unnamed, setUnnamed] = useState(false);
+  const names = useRef<HTMLDivElement>(null);
+  // Why no stops came, said under the search that was pressed - and when the
+  // place could not be had, the way left: the name.
+  const [unfound, setUnfound] = useState<string | null>(null);
+  const field = useRef<HTMLInputElement>(null);
   // The stop the arrow keys light in what was found; Enter takes it.
   const [lit, setLit] = useState("");
 
@@ -179,31 +190,39 @@ function Form({
   async function look(by: Parameters<typeof findStops>[1]) {
     setBusy("stops");
     setError(null);
+    setUnfound(null);
     setMissed(null);
     try {
       const found = await findStops(who, by);
       setStops(found.stops);
       setMissed(found.missed ?? null);
     } catch (e) {
-      const why = failureText(e, "정류장을 찾지 못했어요.");
-      // No fix from the phone yet: the browser's own place, then.
-      if ("near" in by && by.near === "me" && navigator.geolocation) {
+      // No fix from the phone yet (404): the browser's own place, then - and
+      // only then. Asked for on a dropped line too, the place was refused
+      // for nothing, and a phone keeps a refusal.
+      if ("near" in by && by.near === "me" && e instanceof HttpError && e.status === 404 && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => void look({ near: { lat: pos.coords.latitude, lon: pos.coords.longitude } }),
-          () => {
-            setError(why);
+          (err) => {
+            setUnfound(
+              err.code === err.PERMISSION_DENIED
+                ? "위치 권한이 꺼져 있어요. 정류장이나 역 이름으로 찾아 보세요."
+                : "지금 위치를 알아내지 못했어요. 정류장이나 역 이름으로 찾아 보세요.",
+            );
             setBusy(null);
+            field.current?.focus();
           },
           { enableHighAccuracy: true, timeout: 12_000 },
         );
         return;
       }
-      setError(why);
+      setUnfound(failureText(e, "정류장을 찾지 못했어요."));
     }
     setBusy(null);
   }
 
   async function pick(p: Place) {
+    setUnfound(null);
     setPlace(p);
     setStop(p.stops.length === 1 ? p.stops[0] : null);
     setLine(null);
@@ -235,7 +254,12 @@ function Form({
   const windowSet = from !== "" && to !== "";
 
   async function save() {
-    if (!stop || !line || !name.trim()) return;
+    if (!stop || !line) return;
+    if (!name.trim()) {
+      setUnnamed(true);
+      names.current?.scrollIntoView({ block: "center" });
+      return;
+    }
     // One end of the hours is no window: the service refuses it, in words
     // about HH:MM. Said here in the form's own, before it goes.
     if ((from === "") !== (to === "")) {
@@ -278,6 +302,7 @@ function Form({
                   지금 위치 근처
                 </Button>
                 <CommandInput
+                  ref={field}
                   icon={false}
                   value={q}
                   onValueChange={(v) => {
@@ -296,7 +321,7 @@ function Form({
                   wrapperClassName="min-w-0 flex-1"
                 >
                   <InputGroupAddon align="inline-end">
-                    <InputGroupButton type="submit" size="icon-sm" aria-label="찾기" className="text-dim hover:text-foreground mouse:size-7">
+                    <InputGroupButton type="submit" size="icon-sm" aria-label="찾기" className="size-11 text-dim hover:text-foreground mouse:size-7">
                       <Search aria-hidden strokeWidth={1.8} />
                     </InputGroupButton>
                   </InputGroupAddon>
@@ -306,6 +331,11 @@ function Form({
               {busy === "stops" ? (
                 <p role="status" className="mt-3 text-faint">
                   찾는 중…
+                </p>
+              ) : null}
+              {unfound ? (
+                <p role="alert" className="mt-3 text-aside leading-[1.55] break-keep text-reject">
+                  {unfound}
                 </p>
               ) : null}
               {stops ? (
@@ -419,7 +449,7 @@ function Form({
           </Step>
 
           <Step title="이름과 알림">
-            <div className="flex flex-wrap gap-1.5">
+            <div ref={names} className="flex flex-wrap gap-1.5">
               {/* The chip lit is the name written; the field takes any other. */}
               <ToggleGroup
                 type="single"
@@ -434,7 +464,7 @@ function Form({
                 }}
               >
                 {NAMES.map((n) => (
-                  <ToggleGroupItem key={n} value={n} className="px-3.5 text-ui mouse:px-3">
+                  <ToggleGroupItem key={n} value={n} className="h-11 px-3.5 text-ui mouse:h-7 mouse:px-3">
                     {n}
                   </ToggleGroupItem>
                 ))}
@@ -446,22 +476,28 @@ function Form({
                 placeholder="다른 이름"
                 aria-label="경로 이름"
                 maxLength={20}
-                className="h-9 w-28 rounded-full px-3.5 mouse:h-7"
+                className="h-11 w-28 rounded-full px-3.5 mouse:h-7"
               />
             </div>
+            {unnamed && !name.trim() ? (
+              <p role="alert" className="mt-1.5 text-aside text-reject">
+                이름을 고르거나 적어 주세요.
+              </p>
+            ) : null}
             <ToggleGroup
               type="multiple"
               aria-label="요일"
               variant="chip"
               tone="mine"
               size="chip"
-              spacing={1.5}
+              spacing={1}
               value={days.map(String)}
               onValueChange={(v) => setDays(v.map(Number).sort())}
-              className="mt-3 flex-wrap"
+              // Seven of a thumb's 44px fit a 375px phone only this close together.
+              className="mt-3 flex-wrap mouse:gap-1.5"
             >
               {DAY_NAMES.map((d, i) => (
-                <ToggleGroupItem key={d} value={String(i + 1)} className="w-10 px-0 text-ui mouse:w-8">
+                <ToggleGroupItem key={d} value={String(i + 1)} className="size-11 px-0 text-ui mouse:h-7 mouse:w-8">
                   {d}
                 </ToggleGroupItem>
               ))}
@@ -502,14 +538,14 @@ function Form({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button variant="raised" size="touch" onClick={() => void save()} disabled={!stop || !line || !name.trim() || busy === "save"} className="flex-1">
+        <Button variant="raised" size="touch" onClick={() => void save()} disabled={!stop || !line || busy === "save" || busy === "delete"} className="flex-1">
           {busy === "save" ? "저장하는 중…" : "경로 저장"}
         </Button>
         {onDelete && route ? (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="reject" size="touch-sm" disabled={busy === "save"}>
-                지우기
+              <Button variant="reject" size="touch-sm" disabled={busy === "save" || busy === "delete"}>
+                {busy === "delete" ? "지우는 중…" : "지우기"}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -521,7 +557,7 @@ function Form({
                 <AlertDialogCancel>두기</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
-                    setBusy("save");
+                    setBusy("delete");
                     void onDelete().catch((e) => {
                       setError(failureText(e, SAY.couldNotDelete));
                       setBusy(null);
@@ -552,7 +588,11 @@ function Picked({ children, onChange }: { children: ReactNode; onChange: () => v
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">{children}</div>
-      <button type="button" onClick={onChange} className="shrink-0 text-aside text-dim underline-offset-2 hover:text-foreground hover:underline focus-ring">
+      <button
+        type="button"
+        onClick={onChange}
+        className="tap-y -mx-2 shrink-0 px-2 text-aside text-dim underline-offset-2 hover:text-foreground hover:underline focus-ring mouse:mx-0 mouse:px-0 mouse:before:hidden"
+      >
         바꾸기
       </button>
     </div>
@@ -596,24 +636,5 @@ function StopLabel({ stop }: { stop: Stop }) {
       </span>
       {stop.dist ? <span className="tnum shrink-0 text-aside text-faint">{stop.dist >= 1000 ? `${(stop.dist / 1000).toFixed(1)}km` : `${stop.dist}m`}</span> : null}
     </>
-  );
-}
-
-function Stepper({ label, value, min, max, unit, onChange }: { label: string; value: number; min: number; max: number; unit: string; onChange: (v: number) => void }) {
-  const btn = "flex size-9 items-center justify-center rounded-full border border-edge text-dim hover:text-foreground focus-ring disabled:opacity-40 mouse:size-7";
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className="text-dim">{label}</span>
-      <button type="button" aria-label={`${label} 줄이기`} disabled={value <= min} onClick={() => onChange(value - 1)} className={btn}>
-        <Minus aria-hidden className="size-3.5" strokeWidth={2} />
-      </button>
-      <span className="tnum w-10 text-center text-title text-foreground">
-        {value}
-        {unit}
-      </span>
-      <button type="button" aria-label={`${label} 늘리기`} disabled={value >= max} onClick={() => onChange(value + 1)} className={btn}>
-        <Plus aria-hidden className="size-3.5" strokeWidth={2} />
-      </button>
-    </div>
   );
 }

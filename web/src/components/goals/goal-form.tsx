@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Minus, Plus } from "lucide-react";
+import { Stepper } from "@/components/goals/stepper";
 import { useRole } from "@/components/shell/role";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
@@ -189,44 +189,26 @@ function Form({
               ))}
             </ToggleGroup>
           ) : null}
+          {/* Why the button below is greyed out, said where the reason is. */}
+          {v.cadence === "days" && v.weekdays.length === 0 ? (
+            <p className="mt-1.5 text-aside text-faint">요일을 하나 이상 골라 주세요.</p>
+          ) : null}
 
-          {counted ? (
-            <div className="mt-2.5 flex items-center justify-between gap-3">
-              <p className="text-ui text-ink">
-                {v.cadence === "weekly" ? "한 주에" : "한 달에"} <span className="tnum font-medium">{v.times}</span>번
-              </p>
-              <div className="flex gap-1.5">
-                <Button type="button" variant="soft" size="icon-touch" aria-label="한 번 줄이기" disabled={v.times <= 1} onClick={() => set("times", v.times - 1)} className="disabled:opacity-30">
-                  <Minus aria-hidden />
-                </Button>
-                <Button type="button" variant="soft" size="icon-touch" aria-label="한 번 늘리기" disabled={v.times >= most} onClick={() => set("times", v.times + 1)} className="disabled:opacity-30">
-                  <Plus aria-hidden />
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-2.5 flex items-center justify-between gap-3">
-              <p className="text-ui text-ink">
-                하루에 <span className="tnum font-medium">{v.perDay}</span>번
-              </p>
-              <div className="flex gap-1.5">
-                <Button type="button" variant="soft" size="icon-touch" aria-label="하루 횟수 줄이기" disabled={v.perDay <= 1} onClick={() => set("perDay", v.perDay - 1)} className="disabled:opacity-30">
-                  <Minus aria-hidden />
-                </Button>
-                <Button
-                  type="button"
-                  variant="soft"
-                  size="icon-touch"
-                  aria-label="하루 횟수 늘리기"
-                  disabled={v.perDay >= MOST_A_DAY}
-                  onClick={() => set("perDay", v.perDay + 1)}
-                  className="disabled:opacity-30"
-                >
-                  <Plus aria-hidden />
-                </Button>
-              </div>
-            </div>
-          )}
+          <div className="mt-2.5">
+            {counted ? (
+              <Stepper
+                label={v.cadence === "weekly" ? "한 주에" : "한 달에"}
+                name={v.cadence === "weekly" ? "한 주 횟수" : "한 달 횟수"}
+                value={v.times}
+                min={1}
+                max={most}
+                unit="번"
+                onChange={(n) => set("times", n)}
+              />
+            ) : (
+              <Stepper label="하루에" name="하루 횟수" value={v.perDay} min={1} max={MOST_A_DAY} unit="번" onChange={(n) => set("perDay", n)} />
+            )}
+          </div>
           <p className="mt-2 text-aside leading-relaxed text-faint">
             {many
               ? `할 때마다 한 번 했다를 누르고, ${v.perDay}번을 채우면 그날 했다가 돼요. 다 채우지 못한 날은 다음 날 점심에 물어봐요.`

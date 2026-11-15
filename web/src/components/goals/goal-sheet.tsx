@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
 import {
   AlertDialog,
@@ -307,10 +307,22 @@ const shortDay = (day: string) => monthDay(day);
  */
 function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
   const [at, setAt] = useState<number | null>(null);
+  // Twelve bars are a third of a thumb wide each on a phone: a finger that
+  // slides along the row goes from bar to bar, the line above saying which.
+  // A tap is still the bar's own, and a finger going up or down scrolls
+  // (touch-pan-y) without moving off the week shown.
+  const drag = useRef<{ x: number; sliding: boolean } | null>(null);
   const shown = at ?? bars.length - 1;
   const top = Math.max(1, ...bars.map((b) => Math.max(b.target, b.done)));
   const monthly = goal.cadence === "monthly";
   const b = bars[shown];
+  const slide = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || !(e.buttons & 1) || (!d.sliding && Math.abs(e.clientX - d.x) < 8)) return;
+    d.sliding = true;
+    const box = e.currentTarget.getBoundingClientRect();
+    if (box.width > 0) setAt(Math.min(bars.length - 1, Math.max(0, Math.floor(((e.clientX - box.left) / box.width) * bars.length))));
+  };
   if (!b) return null;
   const name = b.open ? (monthly ? "이번 달" : "이번 주") : monthly ? `${Number(b.from.slice(5, 7))}월` : `${shortDay(b.from)} 주`;
   return (
@@ -321,7 +333,15 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
           {name} {b.done}/{b.target}
         </p>
       </div>
-      <div className="mt-3 flex h-28 items-end gap-1 border-b border-edge" role="group" aria-label="달성 막대">
+      <div
+        className="mt-3 flex h-28 touch-pan-y items-end gap-1 border-b border-edge"
+        role="group"
+        aria-label="달성 막대"
+        onPointerDown={(e) => (drag.current = { x: e.clientX, sliding: false })}
+        onPointerMove={slide}
+        onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
+      >
         {bars.map((bar, i) => {
           const hit = bar.target > 0 && bar.done >= bar.target;
           return (
@@ -567,7 +587,7 @@ const stepper =
 
 const choice = (on: boolean) =>
   cn(
-    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-ui focus-ring disabled:opacity-35 aria-disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
+    "flex min-h-11 min-w-11 items-center justify-center rounded-lg border px-3 text-ui focus-ring disabled:opacity-35 aria-disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
     on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
   );
 
@@ -598,7 +618,7 @@ function Day({
       aria-pressed={picked}
       aria-label={`${dayLabel(day)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : going ? ` ${Math.round(share * 100)}% 함` : ""}`}
       className={cn(
-        "tnum relative flex h-10 items-center justify-center overflow-hidden rounded-md text-aside focus-ring disabled:cursor-default mouse:h-8",
+        "tnum relative flex h-11 items-center justify-center overflow-hidden rounded-md text-aside focus-ring disabled:cursor-default mouse:h-8",
         mark === "done" ? "bg-approve-wash text-foreground" : mark === "missed" ? "bg-reject-wash text-dim" : open ? "bg-glass text-dim" : "text-faint",
         today && "ring-1 ring-dim/60",
         picked && "ring-2 ring-foreground/60",

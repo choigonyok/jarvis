@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { type Cell, type Check as DayCheck, type Goal, type Mark, checkDay, listGoals, perDayOf, READ_AGAIN_MS, tally, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
-import { failureText } from "@/lib/say";
+import { failureText, SAY } from "@/lib/say";
 import { isPending } from "@/lib/thread";
 import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
@@ -92,6 +92,7 @@ export function Goals() {
               says when that was: a mark made since on the other phone is not
               on it, and today may be yesterday. */}
           {error && goals ? <AsOf at={read.readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
+          {!goals && !error ? <Placeholder /> : null}
           {taken && goals ? <Taken className="mb-3" /> : null}
 
           {goals && goals.length === 0 && ended.length === 0 ? (
@@ -210,6 +211,48 @@ function NoGoals({ onMake }: { onMake: () => void }) {
 /** The row every goal's cells stand under. */
 const WEEK_GRID = "grid grid-cols-7 w-[11.5rem] shrink-0 sm:w-[15.75rem]";
 
+/**
+ * The register while it is read: the week's heads, and two rows as still
+ * blocks of a name, its seven days and its answers - what comes arrives
+ * into them, not onto a blank page.
+ */
+function Placeholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="mb-4 flex h-11 items-center mouse:h-8">
+          <span className="h-5 w-40 rounded bg-well" />
+        </div>
+        <WeekHead today="" />
+        {["w-3/5", "w-2/5"].map((width) => (
+          <div key={width} className="border-b border-edge-soft py-3">
+            <div className="flex items-start justify-between gap-3">
+              <span className="min-w-0 flex-1 pt-1">
+                <span className={cn("block h-4 rounded bg-well", width)} />
+                <span className="mt-2 block h-3 w-1/3 rounded bg-well" />
+              </span>
+              <span className={WEEK_GRID}>
+                {WEEK_ROW.map((d) => (
+                  <span key={d} className="flex h-9 items-center justify-center">
+                    <span className="size-[1.125rem] rounded-full bg-well" />
+                  </span>
+                ))}
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+              <span className="h-11 rounded-lg bg-well sm:w-16 mouse:h-8" />
+              <span className="h-11 rounded-lg bg-well sm:w-16 mouse:h-8" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** The week's heads, over the column of cells. Today's stands out: the eye starts there. */
 function WeekHead({ today }: { today: string }) {
   const at = today ? (weekdayOf(today) + 6) % 7 : -1;
@@ -257,7 +300,12 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
   const cell = p.week.find((c) => c.day === day);
   const now: DayState = saying ?? (taken?.day === day ? taken.to : null) ?? { mark: cell?.mark, count: cell?.count ?? 0 };
   const busy = saying !== null || taken !== null;
-  const quietToday = !picked && !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
+  // A day it does not ask of keeps its answers out of the way - until its
+  // cell is tapped, or something has been said of it. Tapping today's cell
+  // went back to today and so did nothing: a run on a rest day could not be
+  // marked from the row.
+  const unasked = !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
+  const quietToday = !picked && unasked && !now.mark && !now.count;
   const when = whenLabel(day, p.today);
 
   // Answered from the keys, the pressed answer leaves the page as the row
@@ -326,7 +374,7 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
                 of={n}
                 today={p.today}
                 picked={c.day === picked}
-                onPick={() => setPicked(picked === c.day || c.day === p.today ? null : c.day)}
+                onPick={() => setPicked(picked === c.day || (c.day === p.today && !unasked) ? null : c.day)}
               />
             );
           })}
@@ -355,7 +403,7 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
         <div className="mt-2 sm:flex sm:items-center sm:gap-3">
           {many ? (
             <p className="mb-1.5 flex min-h-6 items-center gap-1.5 text-aside text-dim sm:mb-0">
-              <span role="status" className="tnum">
+              <span role="status" className={cn("tnum", picked && "text-ui text-ink")}>
                 {when} {tally(now.count, n)}
               </span>
               {now.count > 0 ? (
@@ -370,7 +418,7 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
               ) : null}
             </p>
           ) : picked ? (
-            <p className="mb-1.5 text-aside text-dim sm:mb-0">{when} 기록</p>
+            <p className="mb-1.5 text-ui text-ink sm:mb-0">{when} 기록</p>
           ) : null}
           {/* The same pair as a card's: the answer that counts on the thumb's side. */}
           <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:justify-end sm:gap-1.5">
@@ -412,6 +460,11 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
  * and left unsaid is an empty ring, and a day that asks nothing a speck. A goal
  * of more than one a day splits the ring into its times, and each time done
  * fills one: the ring filling is the day going, and full it is the tick.
+ *
+ * Seven beside a goal's name, a day is 26px wide on a phone - narrower than a
+ * thumb - so the day picked is ringed as the sheet's calendar rings it and
+ * said in reading size under the row: a neighbour picked by a miss shows
+ * before an answer is marked on it.
  */
 function Dot({ cell, of, today, picked, onPick }: { cell: Cell; of: number; today: string; picked: boolean; onPick: () => void }) {
   const mark = cell.mark;
@@ -430,7 +483,7 @@ function Dot({ cell, of, today, picked, onPick }: { cell: Cell; of: number; toda
       className={cn(
         "tap-y flex h-9 items-center justify-center rounded-lg focus-ring",
         cell.day === today && "bg-glass-raised",
-        picked && "ring-1 ring-edge",
+        picked && "ring-2 ring-foreground/60",
       )}
     >
       {going ? (

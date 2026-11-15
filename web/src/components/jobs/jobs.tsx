@@ -16,11 +16,12 @@ import { Button } from "@/components/ui/button";
 import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
+import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, waitsOnPerson, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
 import { ago } from "@/lib/spending";
 import { isPending, type Checklist } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
+import { SAY } from "@/lib/say";
 import { HttpError, useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,10 @@ export function Jobs() {
   // The lists with something left when they were read - kept on screen as
   // they are ticked off here (a list finished now says so until next time).
   const [listIds, setListIds] = useState<string[]>([]);
+  // The lists stand over the jobs: arriving after them, they pushed down the
+  // row under a thumb. The jobs wait for the lists' first answer - a moment
+  // at most, so a slow mind does not hold them back.
+  const [listsIn, setListsIn] = useState(false);
   // Folded by default: a few lists to a screen, each opened when wanted.
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set(unfolded));
   const flip = useCallback((id: string) => {
@@ -82,6 +87,7 @@ export function Jobs() {
       if (attempt === 0) {
         void loadOpenLists().then((open) => {
           if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
+          setListsIn(true);
         });
       }
       const res = await fetch("/api/jobs/jobs", { cache: "no-store", signal });
@@ -92,12 +98,20 @@ export function Jobs() {
     { interval: (body) => (body?.jobs?.some((j) => j.running) ? 3_000 : 20_000) },
   );
   const jobs = read.data?.jobs ?? null;
+  useEffect(() => {
+    if (jobs === null || listsIn) return;
+    const late = window.setTimeout(() => setListsIn(true), 1_500);
+    return () => window.clearTimeout(late);
+  }, [jobs, listsIn]);
   const blocked = read.data?.blockedSites ?? [];
   const error = read.error ? "작업을 불러오지 못했어요. 잠시 뒤 다시 시도하세요." : null;
   // When the list on screen was read: a refresh that fails leaves it, and says
   // it is that read - a run shown as going on may have ended since.
   const readAt = read.readAt;
   const load = read.reload;
+  // The jobs in with the lists (or the read failed); until then the page is
+  // the still shape of its rows.
+  const settled = (jobs !== null && listsIn) || error !== null;
 
   // What is open and not done - and a list made meanwhile (it reaches this
   // screen on the stream) joins them.
@@ -106,7 +120,13 @@ export function Jobs() {
   ]
     .map((id) => checklists[id])
     .filter((l): l is Checklist => Boolean(l) && l.status === "active");
-  const live = useMemo(() => (jobs ?? []).filter((j) => LIVE.includes(j.state)), [jobs]);
+  // What waits on one first - a card to answer, a login to give - then the
+  // rest as mind lists them. mind puts a card's wait first but not a
+  // login's, which sat among the scheduled ones.
+  const live = useMemo(
+    () => (jobs ?? []).filter((j) => LIVE.includes(j.state)).sort((a, b) => Number(waitsOnPerson(b)) - Number(waitsOnPerson(a))),
+    [jobs],
+  );
   const ended = useMemo(() => (jobs ?? []).filter((j) => !LIVE.includes(j.state)), [jobs]);
   // Twenty a page, each list its own; a job a notification names opens its page.
   const livePaged = usePaged(live, { focusKey: (j) => `job:${j.id}` });
@@ -129,8 +149,9 @@ export function Jobs() {
             </Failed>
           ) : null}
           {error && jobs ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
+          {!settled ? <Placeholder /> : null}
 
-          {blocked.length > 0 ? (
+          {settled && blocked.length > 0 ? (
             // Waiting on the operator, said the way a waiting card says it - the
             // breathing dot - not in the calendar's violet, which means "mine".
             <section role="alert" className="mb-5 rounded-xl bg-glass px-4 py-3.5">
@@ -151,7 +172,7 @@ export function Jobs() {
             </section>
           ) : null}
 
-          {lists.length > 0 ? (
+          {settled && lists.length > 0 ? (
             <section className="mb-6" aria-label="안 끝난 체크리스트" data-focus="checklists">
               <h2 className="mb-2 px-1 text-aside text-dim">안 끝난 체크리스트</h2>
               <ul className="space-y-3">
@@ -170,7 +191,7 @@ export function Jobs() {
             </section>
           ) : null}
 
-          {jobs ? (
+          {settled && jobs ? (
             live.length > 0 ? (
               <div id={livePaged.anchor} className="scroll-mt-4">
                 <ul className="space-y-1" data-focus="waiting">
@@ -200,9 +221,9 @@ export function Jobs() {
             )
           ) : null}
 
-          {reminders ? <WaitingReminders reminders={reminders} /> : null}
+          {settled && reminders ? <WaitingReminders reminders={reminders} /> : null}
 
-          {ended.length > 0 ? (
+          {settled && ended.length > 0 ? (
             <section className="mt-8 border-t border-edge-soft pt-4">
               <button
                 type="button"
@@ -229,7 +250,7 @@ export function Jobs() {
             </section>
           ) : null}
 
-          {reminders ? <PastReminders reminders={reminders} /> : null}
+          {settled && reminders ? <PastReminders reminders={reminders} /> : null}
         </div>
       </main>
 
@@ -242,6 +263,29 @@ export function Jobs() {
       />
 
       <TabBar pending={waiting.length} />
+    </div>
+  );
+}
+
+/** The rows while the jobs are read: still blocks of a row's lines, which the jobs arrive into. */
+function Placeholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden className="space-y-1">
+        {["w-2/5", "w-3/5", "w-1/2"].map((width) => (
+          <div key={width} className="px-2 py-3">
+            <div className="flex items-center gap-2">
+              <span className={cn("h-4 rounded bg-well", width)} />
+              <span className="ms-auto h-3 w-12 rounded bg-well" />
+            </div>
+            <span className="mt-2.5 block h-3 w-4/5 rounded bg-well" />
+            <span className="mt-2.5 block h-2.5 w-24 rounded bg-well" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -273,7 +317,11 @@ function Row({ job: j, onOpen }: { job: Job; onOpen: () => void }) {
             {j.title}
           </span>
           <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 text-aside", stateTone(j))}>
-            {j.running ? <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-approve" /> : null}
+            {j.running ? (
+              <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-approve" />
+            ) : waitsOnPerson(j) ? (
+              <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
+            ) : null}
             {stateLabel(j)}
           </span>
         </span>
@@ -283,8 +331,11 @@ function Row({ job: j, onOpen }: { job: Job; onOpen: () => void }) {
           <span className="mt-1 block truncate text-aside text-dim">{j.summary}</span>
         ) : null}
         <span className="tnum mt-1 block truncate text-meta text-faint">
+          {/* Running is said beside the title (진행 중); this line says since when. */}
           {j.running
-            ? "지금 실행 중"
+            ? j.lastRunAt
+              ? `${ago(j.lastRunAt)} 시작`
+              : ""
             : j.state === "active" && j.nextAt && !j.blockedSites?.length
               ? `다음 ${when(j.nextAt)}${j.nextReason ? ` · ${j.nextReason}` : ""}`
               : j.state === "waiting"

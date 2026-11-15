@@ -222,7 +222,7 @@ function Body({
                           href={r.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-dim hover:text-foreground focus-ring"
+                          className="tap-y inline-flex items-center gap-1 text-dim hover:text-foreground focus-ring mouse:before:hidden"
                         >
                           <ExternalLink aria-hidden className="size-3" />
                           열기
@@ -239,7 +239,7 @@ function Body({
         ) : null}
 
         <Collapsible className="mt-5 rounded-lg bg-glass px-3 py-2.5">
-          <CollapsibleTrigger className="group/goal flex w-full cursor-pointer items-center gap-1 text-left text-aside text-dim focus-ring">
+          <CollapsibleTrigger className="group/goal tap-y flex w-full cursor-pointer items-center gap-1 text-left text-aside text-dim focus-ring mouse:before:hidden">
             맡긴 일
             <ChevronRight aria-hidden className="size-3.5 text-faint transition-transform group-aria-expanded/goal:rotate-90 motion-reduce:transition-none" />
           </CollapsibleTrigger>
@@ -337,8 +337,8 @@ function Body({
             </Button>
           ) : null}
           {j.state === "active" || j.state === "waiting" ? (
-            <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
-              멈추기
+            <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void act("pause", {}, "잠깐 쉬어요.")} className="flex-1">
+              잠깐 쉬기
             </Button>
           ) : j.state === "paused" || j.state === "failed" ? (
             <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
@@ -491,10 +491,10 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
   const time = when(g.at);
   return (
     <TraceCollapsible defaultOpen={open || live}>
-      <TraceCollapsibleTrigger className="text-aside">
+      <TraceCollapsibleTrigger className="tap-y text-aside mouse:before:hidden">
         <TraceLine status={live ? "running" : undefined} className="gap-1.5 text-aside text-faint">
           <TraceTitle className="tnum">
-            {time} {g.runId ? (live ? "실행 중" : "실행") : "기록"}
+            {time} {g.runId ? (live ? "진행 중" : "실행") : "기록"}
           </TraceTitle>
           {steps ? <TraceDescription>· 동작 {steps}</TraceDescription> : null}
         </TraceLine>
