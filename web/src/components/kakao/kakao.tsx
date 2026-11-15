@@ -7,6 +7,7 @@ import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
@@ -16,7 +17,7 @@ import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { usePaged } from "@/lib/paging";
 import { type CheckState, type StatusReport, held, readStatus } from "@/lib/status";
-import { LIMIT, useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
+import { LIMIT, useKakao, type KakaoMessage, type KakaoRoom, type Older, type Source } from "@/lib/use-kakao";
 import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
@@ -91,7 +92,8 @@ export function Kakao() {
 }
 
 function Feed({ source, report }: { source: Source; report?: StatusReport }) {
-  const { rooms, selected, setSelected, messages, loading, error, missing, readAt, hydrated, reload } = useKakao(source);
+  const { rooms, selected, setSelected, messages, older, loadOlder, loading, error, missing, readAt, hydrated, reload } =
+    useKakao(source);
   // A read again that fails leaves the conversation on screen, said to be
   // from when it was read: one poll lost in a tunnel had put "불러오지
   // 못했어요" in its place until the next, and it came back at its top. Only
@@ -122,6 +124,24 @@ function Feed({ source, report }: { source: Source; report?: StatusReport }) {
     shownRoom.current = selected;
     lastKey.current = key;
   }, [messages, selected]);
+  // Older lines put in front of the first one: that line stays where it was
+  // on screen, and the reader on the message they were reading. Its place in
+  // the list is taken after every drawing, so the next is measured against
+  // what was on screen; the browser's own scroll anchoring is off on the list
+  // (overflow-anchor) - Safari has none, and where there is one the view
+  // would be moved twice.
+  const top = useRef<{ id: string; at: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const was = top.current;
+    const first = el.querySelector<HTMLElement>("[data-message-id]");
+    if (was && first?.dataset.messageId !== was.id) {
+      const row = el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(was.id)}"]`);
+      if (row) el.scrollTop += placeIn(el, row) - was.at;
+    }
+    top.current = first?.dataset.messageId ? { id: first.dataset.messageId, at: placeIn(el, first) } : null;
+  });
   // The lines over the conversation come and go - a read that failed, the
   // collector's - and one that comes while the newest is in view must not
   // push it out of view.
@@ -160,7 +180,7 @@ function Feed({ source, report }: { source: Source; report?: StatusReport }) {
             const el = e.currentTarget;
             pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           }}
-          className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6"
+          className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 [overflow-anchor:none] sm:pb-6"
         >
           {!hydrated ? (
             <Placeholder />
@@ -194,12 +214,7 @@ function Feed({ source, report }: { source: Source; report?: StatusReport }) {
             <Placeholder />
           ) : (
             <div className="space-y-2.5">
-              {/* Where the list stops when it was cut there: a busy room's
-                  two hundred are a day or two, and the top of them had read
-                  as the start of the conversation. */}
-              {messages.length >= LIMIT ? (
-                <p className="pt-2 text-center text-meta text-faint">최근 {LIMIT}개만 보여요</p>
-              ) : null}
+              <Earlier state={older} onMore={loadOlder} />
               {messages.map((m, i) => (
                 <Line key={m.id} message={m} previous={messages[i - 1]} />
               ))}
@@ -208,6 +223,44 @@ function Feed({ source, report }: { source: Source; report?: StatusReport }) {
         </div>
       </main>
     </>
+  );
+}
+
+/** Where a row stands in the list's content, however far the list is scrolled. */
+function placeIn(list: HTMLElement, row: HTMLElement): number {
+  return row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+}
+
+/**
+ * The top of a room's conversation. A room cut at its newest two hundred - a
+ * busy room's are a day or two, and their top had read as the start of the
+ * conversation - has the page before them a press away. Read back to the
+ * first message collected, that is said: the collector began at some point
+ * and keeps two years unless told otherwise, so that may not be where the
+ * conversation began. Over a room that came whole in one read, nothing.
+ */
+function Earlier({ state, onMore }: { state: Older; onMore: () => Promise<void> }) {
+  if (state === null) return null;
+  if (state === "start") {
+    return (
+      <p role="status" className="pt-2 text-center text-meta text-faint">
+        수집된 메시지는 여기까지예요
+      </p>
+    );
+  }
+  if (state === "failed") {
+    // Said as a failure where the conversation starts: in the control's quiet
+    // words it would read as the start.
+    return (
+      <Failed quiet onRetry={onMore} className="pt-2">
+        이전 메시지를 불러오지 못했어요.
+      </Failed>
+    );
+  }
+  return (
+    <Button variant="quiet" size="touch-sm" disabled={state === "loading"} onClick={() => void onMore()} className="w-full">
+      {state === "loading" ? SAY.loading : "이전 메시지 더 보기"}
+    </Button>
   );
 }
 
@@ -497,6 +550,7 @@ const Line = memo(function Line({
         </p>
       )}
       <div
+        data-message-id={message.id}
         className={cn(
           "flex items-baseline gap-2.5",
           message.mine ? "justify-end" : "justify-start",
