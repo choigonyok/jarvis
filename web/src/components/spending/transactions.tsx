@@ -109,9 +109,8 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
             struck && "line-through decoration-faint",
           )}
         >
-          {t.status === "refund" ? "−" : ""}
           {t.estimated ? "약 " : ""}
-          {krw(t.amountKrw)}
+          {krw(t.status === "refund" ? -t.amountKrw : t.amountKrw)}
         </span>
         {t.foreignAmount !== null ? (
           <span className="tnum block text-meta text-faint">{foreign(t)}</span>

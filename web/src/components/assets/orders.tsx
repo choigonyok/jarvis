@@ -162,6 +162,9 @@ export function PlanSheet({
   const [error, setError] = useState<string | null>(null);
   // Sent with no answer back, and looked for in the record by its planId.
   const [looking, setLooking] = useState<{ planId: string; failed: boolean } | null>(null);
+  // A check that did not come is asked again from here (다시 시도): it had
+  // taken closing the sheet and opening it again.
+  const [asked, setAsked] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -176,8 +179,8 @@ export function PlanSheet({
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- checked once per opening
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- checked once per opening, and again when asked
+  }, [open, asked]);
 
   const ready = checked?.results.filter((r) => r.status === "preview") ?? [];
   const unsent = checked?.results.filter((r) => r.status !== "preview") ?? [];
@@ -222,7 +225,13 @@ export function PlanSheet({
       {!checked && !error ? <p className="py-6 text-center text-ui text-faint">주문을 확인하는 중…</p> : null}
       {shown.length ? <OrderList results={shown} names={names} /> : null}
       {checked && shown.length === 0 ? <p className="py-6 text-center text-ui text-faint">지금 낼 주문이 없어요.</p> : null}
-      {error ? <p className="mt-2 text-aside text-reject">{error}</p> : null}
+      {error && !checked ? (
+        <Failed quiet onRetry={() => setAsked((n) => n + 1)}>
+          {error}
+        </Failed>
+      ) : error ? (
+        <p className="mt-2 text-aside text-reject">{error}</p>
+      ) : null}
       {!placed && ready.length > 0 ? (
         <div className="mt-3 space-y-2">
           <p className="text-meta leading-relaxed text-faint">
@@ -319,6 +328,10 @@ export function OrderSheet({
   if (!holding) return null;
   const coin = holding.kind === "coin";
   const gold = holding.kind === "gold";
+  // Ordered by hand in the 한국투자 app, as assets-svc answers them (manual):
+  // KRX gold, and a share in won. No send button promises what it cannot do -
+  // "금현물 2g 매수 주문 보내기" had sent nothing.
+  const byHand = holding.venue === "gold" || (holding.venue === "kis" && holding.currency !== "USD");
   const unitKrw = holding.currency === "USD" ? holding.price * usdKrw : holding.price;
   const n = Number(amount.replace(/[^\d]/g, "")) || 0;
   const amountKrw = coin ? n : n * unitKrw;
@@ -370,18 +383,44 @@ export function OrderSheet({
         onOpenChange(open);
       }}
       title={`${holding.name} 주문`}
-      // The price is as of a read, and says which; once sent, what is held
+      // The price is as of a read, and says which; once placed, what is held
       // is about to change, and the line says that instead.
       description={
         result
-          ? "보낸 결과예요. 체결은 잠시 뒤 잔고에 반영돼요."
+          ? result.status === "placed"
+            ? "보낸 결과예요. 체결은 잠시 뒤 잔고에 반영돼요."
+            : "보낸 결과예요."
           : `보유 ${quantity(holding.quantity)}${coin ? "" : gold ? "g" : "주"} · ${price}${at ? ` · ${clock(at)} 기준` : ""}`
       }
     >
       {result ? (
-        <OrderList results={[result]} names={names} />
+        <>
+          <OrderList results={[result]} names={names} />
+          {/* Turned down, so nothing went: the form comes back with what was
+              sent, to be fixed - it had taken closing the sheet and tapping
+              the holding again, to type it all from the start. */}
+          {result.status === "failed" ? (
+            <Button
+              variant="quiet"
+              size="touch-sm"
+              className="-ms-3 mt-1"
+              onClick={() => {
+                setResult(null);
+                setError(null);
+                edit({ side: result.side, amount: String(result.units ?? result.amountKrw) });
+              }}
+            >
+              고쳐서 다시
+            </Button>
+          ) : null}
+        </>
       ) : (
         <div className="space-y-3">
+          {byHand ? (
+            <p className="text-ui leading-relaxed text-ink">
+              {gold ? "금현물은" : "국내 주식은"} 여기서 보낼 수 없어요. 한국투자 앱에서 직접 주문해 주세요.
+            </p>
+          ) : null}
           {/* Not changed while it is out, or while whether it went is not
               known: what was sent stays in view, and stays what is kept. */}
           <fieldset disabled={busy || looking !== null} className="min-w-0 space-y-3">
@@ -446,13 +485,12 @@ export function OrderSheet({
               {n > 0 ? `약 ${krw(amountKrw)}` : ""}
               {tooMuch ? <span className="text-reject"> · 갖고 있는 것보다 많아요</span> : null}
               {tooSmall ? <span className="text-reject"> · 업비트는 ₩5,000부터예요</span> : null}
-              {gold ? " · 금현물은 한국투자 앱에서 직접 주문해야 해요" : null}
             </p>
           </fieldset>
           {error ? <p className="text-aside text-reject">{error}</p> : null}
           {looking ? (
             <Looking failed={looking.failed} onRetry={() => look(holding.id, looking.planId, { side, amount })} />
-          ) : (
+          ) : byHand ? null : (
             <Button variant="raised" size="touch" className="w-full" disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
               {busy ? "보내는 중…" : n > 0 ? `${line} 주문 보내기` : "수량을 적어 주세요"}
             </Button>
@@ -473,15 +511,24 @@ const when = (iso: string) => dateTime(iso);
  */
 function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: Map<string, string>; onChanged: () => void }) {
   const [busy, setBusy] = useState<number | null>(null);
-  const [note, setNote] = useState<{ text: string; failed?: boolean } | null>(null);
+  // What came of a cancel, said under the order it was pressed on - red when
+  // it did not go. Grey at the foot of the list, a failure had read as done.
+  const [note, setNote] = useState<{ id: number; text: string; failed: boolean } | null>(null);
   const active = standing.filter((o) => o.status === "active");
   const done = standing.filter((o) => o.status !== "active").slice(0, 3);
-  if (active.length === 0 && done.length === 0) return null;
+  const rows = [...active, ...done];
+  if (rows.length === 0) return null;
+  const noteLine = (className?: string) =>
+    note ? (
+      <span role="status" className={cn("block text-meta leading-relaxed", note.failed ? "text-reject" : "text-dim", className)}>
+        {note.text}
+      </span>
+    ) : null;
   return (
     <section aria-label="대기 주문" className="mb-3">
       <p className="mb-1 text-meta text-faint">대기 주문 · 체결될 때까지 거래일마다 다시 내요</p>
       <ul className="divide-y divide-edge-soft">
-        {[...active, ...done].map((o) => {
+        {rows.map((o) => {
           const name = names.get(`kis:${o.symbol}`) ?? o.symbol;
           return (
             <li key={o.id} className="flex items-start gap-3 py-2 text-aside">
@@ -492,6 +539,7 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                 <span className="block text-meta leading-relaxed text-faint">
                   {o.status === "filled" ? "체결됐어요" : o.status === "cancelled" ? "취소됨" : o.status === "expired" ? "기한이 지났어요" : o.message}
                 </span>
+                {note?.id === o.id ? noteLine() : null}
               </span>
               {o.status === "active" ? (
                 // Asked first, as every irreversible step is: one press would
@@ -499,7 +547,7 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="discard" size="inline" disabled={busy === o.id} className="tap shrink-0 px-2 text-aside">
-                      취소
+                      {busy === o.id ? "취소하는 중" : "취소"}
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -515,11 +563,16 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                       <AlertDialogAction
                         onClick={async () => {
                           setBusy(o.id);
+                          setNote(null);
                           try {
-                            setNote({ text: await cancelStanding(o.id) });
+                            const text = await cancelStanding(o.id);
+                            // Cancelled here with today's order still out at the
+                            // broker: assets-svc answers that as done, and says
+                            // in its words ("…취소하지 못했어요") the half that is not.
+                            setNote({ id: o.id, text, failed: text.includes("못했어요") });
                             onChanged();
                           } catch (e) {
-                            setNote({ text: failureText(e, "취소하지 못했어요."), failed: true });
+                            setNote({ id: o.id, text: failureText(e, "취소하지 못했어요."), failed: true });
                             // The line may have dropped after it was done: the list says.
                             onChanged();
                           } finally {
@@ -537,7 +590,8 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
           );
         })}
       </ul>
-      {note ? <p className={cn("mt-1 text-meta", note.failed ? "text-reject" : "text-dim")}>{note.text}</p> : null}
+      {/* The order cancelled may have left the few rows shown: its word stays. */}
+      {note && !rows.some((o) => o.id === note.id) ? noteLine("mt-1") : null}
     </section>
   );
 }

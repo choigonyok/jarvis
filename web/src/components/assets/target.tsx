@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { plannedGains } from "@/components/assets/realized";
 import { Failed } from "@/components/shell/failed";
+import { Input } from "@/components/ui/input";
 import { type Realized, krw, signedKrw, taxFor } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 import type { Allocation, Bucket, Drift } from "@/lib/target";
@@ -91,7 +92,7 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
                   height={Math.abs(y(d) - H / 2) + 3}
                   rx="2"
                   fill="none"
-                  className="stroke-reject"
+                  className="stroke-foreground"
                   strokeWidth="1.2"
                   vectorEffect="non-scaling-stroke"
                 />
@@ -234,31 +235,40 @@ export function AllocationDetail({
         </Failed>
       ) : null}
 
-      <label className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-aside text-dim">
-        <span className="shrink-0">새로 넣을 돈</span>
-        <span className="relative">
-          <input
-            inputMode="numeric"
-            value={deposit ? deposit.toLocaleString("ko-KR") : ""}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="예: 1,000,000"
-            className="tnum h-9 w-36 rounded-lg border border-edge-soft bg-glass px-2.5 pe-7 text-field text-foreground placeholder:text-faint focus-ring mouse:h-8 mouse:text-ui"
-          />
-          <span aria-hidden className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-aside text-faint">
-            원
+      {/* The shared field, a thumb's height on a phone (it was 36px, just
+          under 이 계획대로 주문). The label is the name and the field only:
+          what the amount buys sits beside it, where pressing it had brought
+          the keyboard up. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-aside text-dim">
+        <label className="flex items-center gap-x-2">
+          <span className="shrink-0">새로 넣을 돈</span>
+          <span className="relative">
+            <Input
+              surface="glass"
+              inputMode="numeric"
+              value={deposit ? deposit.toLocaleString("ko-KR") : ""}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="예: 1,000,000"
+              className="tnum w-36 pe-7"
+            />
+            <span aria-hidden className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-aside text-faint">
+              원
+            </span>
           </span>
-        </span>
-        {working ? (
-          <span className="basis-full text-faint sm:basis-auto">→ 계산하는 중…</span>
-        ) : fill ? (
-          <span className="basis-full text-dim sm:basis-auto">
-            {fill.orders.length
-              ? `→ ${fill.orders.map((o) => orderText(o)).join(" · ")}`
-              : "→ 이 금액으로는 살 수 있는 단위가 없어요"}
-            {fill.cashChangeKrw >= 1 ? <span className="text-faint"> · 남는 현금 {krw(fill.cashChangeKrw)}</span> : null}
-          </span>
-        ) : null}
-      </label>
+        </label>
+        <p aria-live="polite" className="basis-full sm:basis-auto">
+          {working ? (
+            <span className="text-faint">→ 계산하는 중…</span>
+          ) : fill ? (
+            <>
+              {fill.orders.length
+                ? `→ ${fill.orders.map((o) => orderText(o)).join(" · ")}`
+                : "→ 이 금액으로는 살 수 있는 단위가 없어요"}
+              {fill.cashChangeKrw >= 1 ? <span className="text-faint"> · 남는 현금 {krw(fill.cashChangeKrw)}</span> : null}
+            </>
+          ) : null}
+        </p>
+      </div>
       {onFill && fill?.orders.length ? (
         <button type="button" onClick={() => onFill(fill)} className={planButton}>
           이대로 사기

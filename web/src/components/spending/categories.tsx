@@ -27,6 +27,9 @@ export function Categories({
     <ul className="space-y-px">
       {rows.map((c) => {
         const active = selected === c.name;
+        // The rows not picked step down a tone rather than fade: the faint
+        // lines in them, under an opacity, fell below what can be read.
+        const muted = selected !== null && !active;
         const over = c.budgetKrw !== null && c.totalKrw > c.budgetKrw;
         const share = book.totalKrw > 0 ? c.totalKrw / book.totalKrw : 0;
         return (
@@ -38,30 +41,29 @@ export function Categories({
               className={cn(
                 "w-full rounded-lg px-2 py-2.5 text-left transition-colors focus-ring",
                 active ? "bg-glass-raised" : "hover:bg-glass",
-                selected && !active && "opacity-55",
               )}
             >
               <span className="flex items-baseline justify-between gap-3">
-                <span className="text-ui text-ink">
+                <span className={cn("text-ui", muted ? "text-dim" : "text-ink")}>
                   {c.name}
                   <span className="tnum ms-2 text-meta text-faint">
                     {c.count ? `${c.count}건` : ""}
                     {c.count && share >= 0.01 ? ` · ${Math.round(share * 100)}%` : ""}
                   </span>
                 </span>
-                <span className="tnum shrink-0 text-ui text-ink">
+                <span className={cn("tnum shrink-0 text-ui", muted ? "text-dim" : "text-ink")}>
                   {krw(c.totalKrw)}
                 </span>
               </span>
               <span className="relative mt-2 block h-1 w-full rounded-full bg-glass">
                 <span
-                  className="block h-full rounded-full bg-foreground/45"
+                  className={cn("block h-full rounded-full", muted ? "bg-foreground/25" : "bg-foreground/45")}
                   style={{ width: `${(Math.max(0, c.totalKrw) / scale) * 100}%` }}
                 />
                 {c.budgetKrw !== null ? (
                   <span
                     aria-hidden
-                    className="absolute -top-1 h-3 w-px bg-dim"
+                    className={cn("absolute -top-1 h-3 w-px", muted ? "bg-faint" : "bg-dim")}
                     style={{ left: `calc(${(c.budgetKrw / scale) * 100}% - 0.5px)` }}
                   />
                 ) : null}

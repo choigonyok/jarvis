@@ -155,7 +155,9 @@ function TxForm({
   const [merchant, setMerchant] = useState(kept?.merchant ?? tx.merchant);
   const [amount, setAmount] = useState(kept?.amount ?? tx.amountKrw.toLocaleString("ko-KR"));
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // What is on its way: both buttons wait for it. A 저장 pressed while the
+  // line was being deleted had sent a change to it.
+  const [busy, setBusy] = useState<"save" | "remove" | null>(null);
   const id = useId();
 
   // A won figure can be corrected where it was a guess (a dollar charge) or
@@ -188,9 +190,13 @@ function TxForm({
       onClose();
       return;
     }
-    setSaving(true);
+    // Checked as 직접 적기 checks them: an emptied amount had saved as ₩0.
+    if (tx.source === "manual" && !merchant.trim()) return setError("사용처를 적어 주세요.");
+    if (amountEditable && !digits(amount)) return setError("금액을 적어 주세요.");
+    setBusy("save");
+    setError(null);
     const err = await send(`transactions/${tx.id}`, "PATCH", patch);
-    setSaving(false);
+    setBusy(null);
     if (err) {
       setError(err);
       return;
@@ -205,8 +211,13 @@ function TxForm({
 
   // Asked first (the 지우기 below opens the question): a deleted line is gone.
   const remove = async () => {
+    setBusy("remove");
+    setError(null);
     const err = await send(`transactions/${tx.id}`, "DELETE");
-    if (err) return setError(err);
+    if (err) {
+      setBusy(null);
+      return setError(err);
+    }
     keepValue(txKey(tx.id), undefined);
     onSaved("지웠어요");
   };
@@ -232,7 +243,7 @@ function TxForm({
       ) : null}
       {tx.source === "asset" ? (
         <p className="text-aside leading-relaxed text-dim">
-          {tx.issuer}에서 뺀 돈을 지출로 답한 내역이에요. 금액이나 용도를 바꾸려면 자산 탭 원금에서 다시 물어 주세요.
+          {tx.issuer}에서 뺀 돈을 지출로 답한 내역이에요. 금액이나 용도를 바꾸려면 자산 탭 원금에서 그 답을 지우고 다시 답해 주세요.
         </p>
       ) : null}
 
@@ -302,8 +313,8 @@ function TxForm({
         {tx.source === "manual" ? (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="quiet" size="touch-sm">
-                지우기
+              <Button variant="quiet" size="touch-sm" disabled={busy !== null}>
+                {busy === "remove" ? "지우는 중" : "지우기"}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -320,8 +331,8 @@ function TxForm({
             </AlertDialogContent>
           </AlertDialog>
         ) : null}
-        <Button variant="raised" size="touch" disabled={saving} onClick={() => void save()} className="flex-1">
-          {saving ? "저장하는 중" : "저장"}
+        <Button variant="raised" size="touch" disabled={busy !== null} onClick={() => void save()} className="flex-1">
+          {busy === "save" ? "저장하는 중" : "저장"}
         </Button>
       </div>
     </div>
@@ -347,12 +358,18 @@ function OrderSection({
 }) {
   const site = SITE_LABEL[tx.enrichSource ?? ""] ?? "주문";
   const [error, setError] = useState<string | null>(null);
+  // Said and locked while it goes: on a slow line nothing had changed until
+  // the answer, and a second press asked twice.
+  const [busy, setBusy] = useState(false);
   const items = tx.items ?? [];
 
   const retry = async () => {
+    setBusy(true);
     const err = await send("enrich/retry", "POST", { id: tx.id });
-    if (err) setError(err);
-    else onSaved(`${site} 주문을 다시 확인할게요`);
+    if (err) {
+      setBusy(false);
+      setError(err);
+    } else onSaved(`${site} 주문을 다시 확인할게요`);
   };
 
   const status =
@@ -379,8 +396,8 @@ function OrderSection({
         <p className="mt-1.5 text-meta text-faint">{tx.enrichNote}</p>
       ) : null}
       {tx.enrichStatus !== "pending" ? (
-        <Button variant="quiet" size="touch-sm" onClick={() => void retry()} className="-ms-3 mt-1">
-          주문 다시 확인하기
+        <Button variant="quiet" size="touch-sm" disabled={busy} onClick={() => void retry()} className="-ms-3 mt-1">
+          {busy ? "확인하는 중…" : "주문 다시 확인하기"}
         </Button>
       ) : null}
       {error ? <p className="mt-1 text-aside text-reject">{error}</p> : null}

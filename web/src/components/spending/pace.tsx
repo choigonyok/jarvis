@@ -114,10 +114,14 @@ function PaceLine({
           </p>
         ) : null}
       </div>
+      {/* Underlined as the sentence for setting a budget is, and named for
+          what it does: once one was set, a faint "예산 ₩1,500,000" beside the
+          sentence read as part of it - and it is the only way to the budgets. */}
       <button
         type="button"
         onClick={onEditBudget}
-        className="tap -my-2 shrink-0 rounded-md px-1 text-aside text-faint transition-colors hover:text-dim focus-ring"
+        aria-label={hasBudget ? `예산 ${krw(reference)} 고치기` : undefined}
+        className="tap -my-2 shrink-0 rounded-md px-1 text-aside text-dim underline decoration-edge underline-offset-4 transition-colors hover:text-foreground focus-ring"
       >
         {hasBudget ? `예산 ${krw(reference)}` : "예산 정하기"}
       </button>
@@ -158,6 +162,21 @@ function DayStrip({
   };
 
   const shown = scrub !== null ? book.daily[scrub] : null;
+  // One stop for Tab, not one a day: the day picked - else today, else the
+  // month's last - takes it, and the arrows walk the days from there. Getting
+  // past the strip to the categories had taken thirty presses.
+  const past = book.daily.filter((d) => d.date <= book.today);
+  const home =
+    past.find((d) => d.date === selectedDay)?.date ?? past.find((d) => d.date === book.today)?.date ?? past.at(-1)?.date;
+  const walk = (e: React.KeyboardEvent) => {
+    const bars = [...(strip.current?.querySelectorAll<HTMLButtonElement>("button:enabled") ?? [])];
+    const i = bars.indexOf(document.activeElement as HTMLButtonElement);
+    const to =
+      e.key === "ArrowLeft" ? i - 1 : e.key === "ArrowRight" ? i + 1 : e.key === "Home" ? 0 : e.key === "End" ? bars.length - 1 : null;
+    if (i < 0 || to === null || !bars[to]) return;
+    e.preventDefault();
+    bars[to].focus();
+  };
 
   return (
     <div className="mt-5">
@@ -183,6 +202,10 @@ function DayStrip({
           aria-label="날짜별 지출. 누르거나, 누른 채 옆으로 밀어 고른 날의 내역만 봐요"
           className="relative flex h-16 touch-pan-y items-end gap-[2px] select-none [-webkit-touch-callout:none] sm:h-20 sm:gap-[3px]"
           onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={walk}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setScrub(null);
+          }}
           onPointerDown={(e) => {
             scrubbed.current = false;
             if (e.pointerType === "mouse") return;
@@ -273,7 +296,13 @@ function DayStrip({
                 }}
                 aria-pressed={selected}
                 aria-label={`${dayLabel(d.date)} ${d.count ? `${krw(d.totalKrw)} ${d.count}건` : "지출 없음"}`}
-                className="group relative flex h-full min-w-0 flex-1 items-end rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
+                tabIndex={d.date === home ? 0 : -1}
+                // Come to by the keyboard, a day shows what a finger resting
+                // on it shows; a tap's or a click's focus does not.
+                onFocus={(e) => {
+                  if (e.currentTarget.matches(":focus-visible")) setScrub(i);
+                }}
+                className="group relative flex h-full min-w-0 flex-1 items-end rounded-[2px] focus-ring disabled:cursor-default"
               >
                 <span
                   className={cn(

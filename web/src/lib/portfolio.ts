@@ -265,9 +265,14 @@ export function rateOf(h: Holding) {
   return h.costKrw > 0 ? (h.valueKrw - h.costKrw) / h.costKrw : 0;
 }
 
-/** ₩1,234,567 - no decimals; nobody reads won to the fraction. */
+/**
+ * ₩1,234,567 - no decimals; nobody reads won to the fraction. Below zero it
+ * is −₩12,300, the sign signedKrw puts there: a day of refunds had read
+ * ₩-12,300 over a row of −₩12,300, the hyphen a dash between ₩ and figure.
+ */
 export function krw(value: number): string {
-  return `₩${Math.round(value).toLocaleString("ko-KR")}`;
+  const won = Math.round(Math.abs(value));
+  return `${value < 0 && won > 0 ? "−" : ""}₩${won.toLocaleString("ko-KR")}`;
 }
 
 /** Signed, so a loss reads as a loss without relying on the colour. */

@@ -13,6 +13,7 @@ import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import type { Order } from "@/lib/trade-plan";
 import { cn } from "@/lib/utils";
+import { monthDay } from "@/lib/when";
 
 /**
  * What has already been taken off the table.
@@ -27,16 +28,16 @@ export function RealizedSection({ realized }: { realized: Realized }) {
   const { lines, totalKrw, tax, since, missing } = realized;
   const paged = usePaged(lines);
   const up = totalKrw >= 0;
-  const [, m, d] = since.split("-").map(Number);
+  const from = monthDay(since);
 
   return (
     <div>
       <p className="text-title leading-snug text-ink">
         {lines.length === 0 ? (
-          `${m}월 ${d}일 이후 판 것이 없어요`
+          `${from} 이후 판 것이 없어요`
         ) : (
           <>
-            {m}월 {d}일 이후 팔아서{" "}
+            {from} 이후 팔아서{" "}
             <span className={cn("tnum font-semibold", up ? "text-approve" : "text-reject")}>
               {signedKrw(totalKrw)}
             </span>

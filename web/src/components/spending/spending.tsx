@@ -43,6 +43,7 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
+import { monthDay } from "@/lib/when";
 
 const thisMonth = () =>
   new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 7);
@@ -73,7 +74,7 @@ export function Spending() {
 
   const [day, setDay] = useKept<string | null>("spending:day", null);
   const [category, setCategory] = useKept<string | null>("spending:category", null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useKept("spending:query", "");
 
   // The payment left open, and an entry being written, stay open across a
   // tab switch (lib/keep.ts) - what was typed in them too (sheets.tsx).
@@ -173,11 +174,14 @@ export function Spending() {
   const shown = useMemo(() => {
     if (!book) return [];
     const q = query.trim().toLowerCase();
+    // Whatever a row shows can be found: an order's items and the categories
+    // too - "휴지" bought at 쿠팡 had found nothing, its merchant being 쿠팡.
+    const found = (t: Tx) =>
+      [t.merchant, t.memo, t.category, ...(t.items ?? []).flatMap((it) => [it.name, it.category])].some((s) =>
+        s.toLowerCase().includes(q),
+      );
     return book.transactions.filter(
-      (t) =>
-        (!day || dayKey(t.approvedAt) === day) &&
-        (!category || inCategory(t, category)) &&
-        (!q || t.merchant.toLowerCase().includes(q) || t.memo.toLowerCase().includes(q)),
+      (t) => (!day || dayKey(t.approvedAt) === day) && (!category || inCategory(t, category)) && (!q || found(t)),
     );
   }, [book, day, category, query]);
   const shownTotal = shown.reduce(
@@ -187,6 +191,7 @@ export function Spending() {
   const filtered = Boolean(day || category || query.trim());
 
   const current = month === thisMonth();
+  const monthName = monthLabel(month, month.slice(0, 4) !== thisMonth().slice(0, 4));
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   // The arrows count from the month on its way, while it is read: from the
   // month on screen, ‹ pressed again asked for that same month again, and
@@ -212,7 +217,7 @@ export function Spending() {
               <ChevronLeft aria-hidden className="size-4" />
             </button>
             <h2 className="min-w-14 text-center text-ui text-dim" aria-live="polite">
-              {monthLabel(month, month.slice(0, 4) !== thisMonth().slice(0, 4))}
+              {monthName}
             </h2>
             <button
               type="button"
@@ -256,7 +261,11 @@ export function Spending() {
           ) : null}
 
           {book ? (
-            <div className={cn("transition-opacity", loading && "opacity-60")}>
+            // Dimmed only while another month is on its way, about to take
+            // this one's place. The same month read again - each minute, on
+            // coming back, after a save - is quiet: the whole book had faded
+            // every minute, the faint lines under it past reading.
+            <div className={cn("transition-opacity", asked && loading && "opacity-60")}>
               <Headline book={book} current={current} day={day} />
               <Status book={book} onOpenUnparsed={() => setUnparsedOpen(true)} onRetried={done} />
 
@@ -271,7 +280,18 @@ export function Spending() {
 
               {book.categories.length > 0 ? (
                 <section className="mt-6 border-t border-edge-soft pt-5" aria-label="분류별">
-                  <h2 className="mb-2 px-2 text-ui text-dim">어디에 썼나</h2>
+                  <div className="mb-2 flex items-baseline justify-between px-2">
+                    <h2 className="text-ui text-dim">어디에 썼나</h2>
+                    {/* A category's budget is set in the budget sheet; the rows,
+                        which only filter, had no way there. */}
+                    <button
+                      type="button"
+                      onClick={() => setBudgetOpen(true)}
+                      className="tap-y rounded-sm text-meta text-dim underline decoration-edge underline-offset-4 transition-colors hover:text-foreground focus-ring"
+                    >
+                      분류별 예산
+                    </button>
+                  </div>
                   <Categories book={book} selected={category} onSelect={setCategory} />
                 </section>
               ) : null}
@@ -295,9 +315,7 @@ export function Spending() {
                         </span>
                         <span className="shrink-0 text-right">
                           <span className="tnum block text-ui text-ink">{krw(r.amountKrw)}</span>
-                          <span className="tnum block text-meta text-faint">
-                            {r.nextAt.slice(5).replace("-", "/")} 예정
-                          </span>
+                          <span className="tnum block text-meta text-faint">{monthDay(r.nextAt)} 예정</span>
                         </span>
                       </li>
                     ))}
@@ -312,16 +330,16 @@ export function Spending() {
               >
                 <div className="mb-3 flex items-center gap-2 px-2">
                   <h2 className="text-ui text-dim">내역</h2>
-                  <InputGroup className="ms-auto h-10 min-w-0 flex-1 border-transparent sm:max-w-56 mouse:h-8">
+                  <InputGroup className="ms-auto min-w-0 flex-1 border-transparent sm:max-w-56 mouse:h-8">
                     <InputGroupAddon className="pl-2.5">
                       <Search aria-hidden className="size-3.5" />
                     </InputGroupAddon>
                     <InputGroupInput
                       type="search"
-                      aria-label="사용처나 메모로 찾기"
+                      aria-label={`${monthName} 내역에서 사용처·상품·분류·메모로 찾기`}
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="찾기"
+                      placeholder={`${monthName} 내역 찾기`}
                       className="ps-1.5 pe-2 mouse:text-aside"
                     />
                   </InputGroup>
@@ -353,7 +371,10 @@ export function Spending() {
                 ) : (
                   <p className="px-2 py-8 text-center text-ui text-faint">
                     {filtered
-                      ? "조건에 맞는 내역이 없어요."
+                      ? query.trim()
+                        ? // The search goes as far as the month on screen, and says so.
+                          `${monthName} 내역에서 찾지 못했어요.`
+                        : "조건에 맞는 내역이 없어요."
                       : current
                         ? "이번 달 카드 알림이 아직 없어요. 결제하면 몇 초 안에 여기 나타나요."
                         : "이 달에는 기록된 내역이 없어요."}
@@ -461,7 +482,8 @@ function Headline({ book, current, day }: { book: Book; current: boolean; day: s
     const when = current ? `${prevLabel} 이맘때` : prevLabel;
     compare =
       Math.abs(diff) < 1000
-        ? `${when}와 비슷해요`
+        ? // 이맘때 takes 와; a month's name, ending on 월, takes 과 ("9월와" it read).
+          `${when}${current ? "와" : "과"} 비슷해요`
         : `${when}보다 ${krw(Math.abs(diff))} ${diff > 0 ? "더" : "덜"} 썼어요`;
   }
   return (
@@ -541,8 +563,12 @@ function Blocked({
   onRetried: (note: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // Said and locked while it goes, so a slow line is not pressed twice.
+  const [busy, setBusy] = useState(false);
   const retry = async () => {
+    setBusy(true);
     const err = await send("enrich/retry", "POST", { source });
+    setBusy(false);
     if (err) setError(err);
     else onRetried(`${label} 주문을 다시 확인할게요`);
   };
@@ -562,10 +588,11 @@ function Blocked({
         <span aria-hidden className="text-faint">·</span>
         <button
           type="button"
+          disabled={busy}
           onClick={() => void retry()}
-          className="tap flex items-center rounded-md px-1 text-dim hover:text-foreground focus-ring"
+          className="tap flex items-center rounded-md px-1 text-dim hover:text-foreground focus-ring disabled:opacity-50"
         >
-          로그인했으면 다시 시도
+          {busy ? "확인하는 중…" : "로그인했으면 다시 시도"}
         </button>
       </div>
       {error ? <p className="ps-3 text-reject">{error}</p> : null}

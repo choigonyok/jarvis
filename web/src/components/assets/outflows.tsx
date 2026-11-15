@@ -1,6 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { krw, VENUE_LABEL, type Outflow, type OutflowPart } from "@/lib/portfolio";
@@ -15,8 +26,6 @@ import { monthDay } from "@/lib/when";
  * here, and what was spent goes into the 가계부. None of it moves a figure
  * above: a withdrawal left the principal whatever it was for.
  */
-
-const md = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
 const addDays = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`);
@@ -41,8 +50,10 @@ export function OutflowSummary({ outflows }: { outflows: Outflow[] }) {
     <>
       {spent > 0 ? <p className="tnum mt-1 text-aside text-dim">투자에서 꺼내 쓴 돈 {krw(spent)}</p> : null}
       {asking.length > 0 ? (
+        // A question waiting on its answer, as a card waiting on its decision:
+        // the breathing dot, not the red of something failed.
         <p className="tnum mt-1 text-aside leading-relaxed text-dim">
-          <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
+          <span aria-hidden className="anim-breathe me-1.5 inline-block size-[5px] rounded-full bg-dim align-middle" />
           어디로 갔는지 묻는 중 {asking.length}건 · {krw(asking.reduce((sum, o) => sum + o.askKrw, 0))}
         </p>
       ) : null}
@@ -51,7 +62,7 @@ export function OutflowSummary({ outflows }: { outflows: Outflow[] }) {
 }
 
 /**
- * One part of a withdrawal, in words: "→ 업비트로 옮김 · 10/8", "지출(생활·통신) · 월세".
+ * One part of a withdrawal, in words: "→ 업비트로 옮김 · 10월 8일", "지출(생활·통신) · 월세".
  * The category in brackets: its own name may hold a middle dot.
  */
 function partLine(p: OutflowPart, whole: number): string {
@@ -98,7 +109,8 @@ export function OutflowList({ outflows, onChanged }: { outflows: Outflow[]; onCh
 function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: () => void }) {
   const [state, setState] = useState<"idle" | "busy" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
-  const answered = o.parts.some((p) => p.decidedAt);
+  // What a person said; a transfer that was found is no answer, and stays.
+  const answers = o.parts.filter((p) => p.decidedAt);
 
   const askAgain = async () => {
     setState("busy");
@@ -119,7 +131,9 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
 
   return (
     <li className="flex items-start gap-3 py-2.5 text-aside">
-      <span className="tnum w-[2.75rem] shrink-0 pt-px text-faint">{md(o.date)}</span>
+      {/* The date as the line under it says one (lib/when.ts), its year when
+          not this one: the withdrawals run back past New Year. */}
+      <span className="tnum w-16 shrink-0 pt-px text-faint">{monthDay(o.date)}</span>
       <span className="min-w-0 flex-1">
         <span className="tnum block text-ink">
           {VENUE_LABEL[o.venue]} {krw(o.amountKrw)}
@@ -131,7 +145,7 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
         ))}
         {o.status === "ask" ? (
           <span className="tnum block text-meta text-dim">
-            <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
+            <span aria-hidden className="anim-breathe me-1.5 inline-block size-[5px] rounded-full bg-dim align-middle" />
             어디로 갔는지 묻는 중{o.parts.length > 0 ? ` ${krw(o.askKrw)}` : ""}
           </span>
         ) : o.status === "waiting" ? (
@@ -142,16 +156,38 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
         {state === "done" ? <span className="block text-meta text-faint">다시 물을게요. 곧 대화에 카드가 와요.</span> : null}
         {error ? <span className="block text-meta text-reject">{error}</span> : null}
       </span>
-      {answered && state !== "done" ? (
-        <button
-          type="button"
-          disabled={state === "busy"}
-          onClick={() => void askAgain()}
-          // The hit area reaches above and below; the word sits level with the amount.
-          className="tap -mt-2.5 -mb-2.5 flex shrink-0 items-start rounded-lg px-1.5 pt-3 text-meta leading-none text-faint transition-colors hover:text-dim focus-ring disabled:opacity-50"
-        >
-          {state === "busy" ? "지우는 중" : "다시 묻기"}
-        </button>
+      {answers.length > 0 && state !== "done" ? (
+        // Asked first, and named for what it does: the answer goes for good -
+        // assets-svc keeps nothing to put back - and what of it was spent
+        // leaves the 가계부 with it. One brush of a scrolling thumb on
+        // "다시 묻기" had wiped a split answered months before.
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              type="button"
+              disabled={state === "busy"}
+              // The hit area reaches above and below; the word sits level with the amount.
+              className="tap -mt-2.5 -mb-2.5 flex shrink-0 items-start rounded-lg px-1.5 pt-3 text-meta leading-none text-faint transition-colors hover:text-dim focus-ring disabled:opacity-50"
+            >
+              {state === "busy" ? "지우는 중" : "답 지우기"}
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>이 답을 지우고 다시 물을까요?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {monthDay(o.date)} {VENUE_LABEL[o.venue]}에서 뺀 {krw(o.amountKrw)}에 한 답이 지워져요:{" "}
+                {answers.map((p) => partLine(p, o.amountKrw)).join(", ")}.{" "}
+                {answers.some((p) => p.use === "spend") ? "가계부에 들어간 지출도 함께 빠지고, " : ""}대화에서 카드로 다시
+                물어요. 되돌릴 수 없어요.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>두기</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void askAgain()}>지우고 다시 묻기</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       ) : null}
     </li>
   );

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type TrackPoint, krw, percent, signedKrw } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
+import { monthDay } from "@/lib/when";
 
 /**
  * The whole pot, day by day, in one chart: its size as a line, and its return
@@ -81,7 +82,12 @@ export function Track({ points }: { points: TrackPoint[] }) {
     setAt(Math.round(f * (n - 1)));
   };
   const side = at === null ? 0 : at / (n - 1);
-  const manwon = (v: number) => `${Math.round(v / 10_000).toLocaleString("ko-KR")}만`;
+  // The day a keyboard or a screen reader is on: the card's, else the last.
+  const day = at ?? n - 1;
+  const manwon = (v: number) => {
+    const man = Math.round(Math.abs(v) / 10_000);
+    return `${v < 0 && man > 0 ? "−" : ""}${man.toLocaleString("ko-KR")}만`;
+  };
   const shown = at === null ? null : points[at];
 
   return (
@@ -92,7 +98,28 @@ export function Track({ points }: { points: TrackPoint[] }) {
         <Key mark="bar">원금 대비 수익률</Key>
       </figcaption>
 
-      <div className="relative rounded-lg bg-glass px-12 pt-5 pb-5">
+      <div className="relative rounded-lg bg-glass px-12 pt-5 pb-5 has-[input:focus-visible]:ring-3 has-[input:focus-visible]:ring-ring/50">
+        {/* The days for a keyboard and a screen reader, which no pointer
+            reached: a slider over the same points, its card the same one a
+            finger opens, its value that card in words. */}
+        <input
+          type="range"
+          min={0}
+          max={n - 1}
+          step={1}
+          value={day}
+          onChange={(e) => setAt(Number(e.target.value))}
+          onFocus={(e) => {
+            if (e.currentTarget.matches(":focus-visible")) setAt(day);
+          }}
+          onBlur={() => setAt(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setAt(null);
+          }}
+          aria-label="날짜별 총자산"
+          aria-valuetext={`${monthDay(points[day].date)} 총자산 ${krw(points[day].totalKrw)}, 넣은 원금 ${krw(points[day].principalKrw)}, 수익 ${signedKrw(points[day].totalKrw - points[day].principalKrw)} ${percent(rates[day], 2)}`}
+          className="sr-only"
+        />
         <div
           className="relative touch-pan-y"
           onPointerDown={pick}
@@ -106,7 +133,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
             preserveAspectRatio="none"
             className="h-52 w-full overflow-visible"
             role="img"
-            aria-label={`총자산 ${points[0].date} ${krw(points[0].totalKrw)}에서 ${points[n - 1].date} ${krw(points[n - 1].totalKrw)}, 수익률 ${percent(rates[0], 1)}에서 ${percent(rates[n - 1], 1)}`}
+            aria-label={`총자산 ${monthDay(points[0].date)} ${krw(points[0].totalKrw)}에서 ${monthDay(points[n - 1].date)} ${krw(points[n - 1].totalKrw)}, 수익률 ${percent(rates[0], 1)}에서 ${percent(rates[n - 1], 1)}`}
           >
             {/* The rate's zero line. */}
             <line
@@ -194,8 +221,10 @@ export function Track({ points }: { points: TrackPoint[] }) {
                 className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-background"
                 style={{ left: `${(x(at) / W) * 100}%`, top: `${(y(shown.totalKrw) / H) * 100}%` }}
               />
+              {/* Said by the slider's value; read out again as a live
+                  region, it spoke on every move of a mouse. */}
               <div
-                role="status"
+                aria-hidden
                 className={cn(
                   "pointer-events-none absolute -top-3 z-10",
                   side < 0.3 ? "translate-x-2" : side > 0.7 ? "-translate-x-[calc(100%+0.5rem)]" : "-translate-x-1/2",
@@ -210,9 +239,10 @@ export function Track({ points }: { points: TrackPoint[] }) {
 
       </div>
 
+      {/* The record runs across years: its ends say which (lib/when.ts). */}
       <div className="mt-1.5 flex justify-between px-12 text-tiny text-faint">
-        <span className="tnum">{points[0].date.slice(5).replace("-", ".")}</span>
-        <span className="tnum">{points[n - 1].date.slice(5).replace("-", ".")}</span>
+        <span className="tnum">{monthDay(points[0].date)}</span>
+        <span className="tnum">{monthDay(points[n - 1].date)}</span>
       </div>
     </figure>
   );
@@ -222,9 +252,7 @@ function Card({ point, rate }: { point: TrackPoint; rate: number }) {
   const gain = point.totalKrw - point.principalKrw;
   return (
     <div className="tnum w-max rounded-lg border border-edge bg-popover px-3 py-2 text-aside leading-relaxed shadow-lg">
-      <p className="text-ink">
-        {Number(point.date.slice(5, 7))}월 {Number(point.date.slice(8, 10))}일
-      </p>
+      <p className="text-ink">{monthDay(point.date)}</p>
       <p className="text-dim">총자산 {krw(point.totalKrw)}</p>
       <p className="text-faint">넣은 원금 {krw(point.principalKrw)}</p>
       <p className={gain >= 0 ? "text-approve" : "text-reject"}>

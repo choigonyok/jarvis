@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { ChevronRight, RefreshCw } from "lucide-react";
 import { OrderRecord, OrderSheet, PlanSheet } from "@/components/assets/orders";
 import { OutflowList, OutflowSummary } from "@/components/assets/outflows";
 import { RealizedSection } from "@/components/assets/realized";
@@ -73,6 +73,10 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Still only the last numbers after every follow-up: they are said as that
+  // old, with the way to read again - "갱신 중…" had stood there for good,
+  // promising numbers nothing was fetching any more.
+  const [gaveUp, setGaveUp] = useState(false);
   const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false, principal: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   // The order sheet left open stays open across a tab switch (lib/keep.ts).
@@ -124,17 +128,21 @@ export function Assets() {
   const load = useCallback(async (fresh = false, tries = 0) => {
     if (followUp.current) window.clearTimeout(followUp.current);
     setLoading(true);
+    setGaveUp(false);
     try {
       const res = await fetch(`/api/portfolio${fresh ? "?fresh=1" : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const next = (await res.json()) as Portfolio;
       setData(next);
       setError(null);
-      if (next.stale && tries < 4) {
-        followUp.current = window.setTimeout(() => again.current(tries + 1), 2500);
+      if (next.stale) {
+        if (tries < 4) followUp.current = window.setTimeout(() => again.current(tries + 1), 2500);
+        else setGaveUp(true);
       }
-    } catch {
-      setError("잔고를 불러오지 못했어요.");
+    } catch (e) {
+      // No answer at all is the phone's connection; anything else is the
+      // service's, whatever its cause - not, as it was always said, the keys.
+      setError(e instanceof TypeError ? SAY.offline : "잔고를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -191,6 +199,10 @@ export function Assets() {
   const rateOf0 = (p: { totalKrw: number; principalKrw: number }) =>
     p.principalKrw > 0 ? (p.totalKrw - p.principalKrw) / p.principalKrw : 0;
   const active = record?.standing.filter((o) => o.status === "active") ?? [];
+  // The record's last day and that day's orders: the count beside the day
+  // had been the whole record's, "최근 오늘 · 37건 보냄" after one today.
+  const lastDay = record?.orders[0] ? dayOf(new Date(record.orders[0].createdAt)) : null;
+  const lastDayCount = record?.orders.filter((o) => dayOf(new Date(o.createdAt)) === lastDay).length ?? 0;
   // The order sheet follows its holding as the portfolio is read again - how
   // many are held, the price - not the moment it was tapped. One gone from
   // the list since (sold out, its account not read) keeps the read it was
@@ -235,8 +247,8 @@ export function Assets() {
                   <AsOf
                     at={data.at}
                     seconds
-                    busy={data.stale || loading}
-                    failed={error !== null}
+                    busy={loading || (data.stale && !gaveUp)}
+                    failed={error !== null || gaveUp}
                     onRetry={() => void load(true)}
                     className="mt-1.5"
                   >
@@ -263,7 +275,9 @@ export function Assets() {
             {/* Nothing read yet: the whole screen says it. A refresh that
                 failed over figures already shown is said on their line. */}
             {error && !data ? (
-              <Failed className="mb-5">{error} 키 설정을 확인하고 다시 시도해 주세요.</Failed>
+              <Failed onRetry={() => load(true)} className="mb-5">
+                {error}
+              </Failed>
             ) : null}
 
             {/* A venue that failed is named. A total quietly missing a holding
@@ -278,33 +292,40 @@ export function Assets() {
               </ul>
             ) : null}
 
-            {data && data.holdings.length > 0 ? (
+            {/* Read is enough for these. With nothing held - all sold, a
+                standing order waiting to buy - the principal, the orders and
+                their 취소 had gone with the holdings, under a total that still
+                counted the cash. Only the rows about holdings wait for one:
+                the return, unless something was sold, and the allocation. */}
+            {data ? (
               <div className="border-b border-edge-soft">
-                <Row
-                  id="assets-bridge"
-                  title="수익"
-                  focus="summary"
-                  open={open.bridge}
-                  onToggle={() => toggle("bridge")}
-                  detail={
-                    <div className="space-y-5">
-                      {bridge ? <ProfitOther {...bridge} /> : null}
-                      {data.realized ? (
-                        <div data-focus="tax">
-                          <RealizedSection realized={data.realized} />
-                        </div>
-                      ) : null}
-                    </div>
-                  }
-                >
-                  {bridge ? (
-                    <ProfitLines {...bridge} />
-                  ) : (
-                    <span className="tnum text-ui text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
-                  )}
-                </Row>
+                {data.holdings.length > 0 || bridge ? (
+                  <Row
+                    id="assets-bridge"
+                    title="수익"
+                    focus="summary"
+                    open={open.bridge}
+                    onToggle={() => toggle("bridge")}
+                    detail={
+                      <div className="space-y-5">
+                        {bridge ? <ProfitOther {...bridge} /> : null}
+                        {data.realized ? (
+                          <div data-focus="tax">
+                            <RealizedSection realized={data.realized} />
+                          </div>
+                        ) : null}
+                      </div>
+                    }
+                  >
+                    {bridge ? (
+                      <ProfitLines {...bridge} />
+                    ) : (
+                      <span className="tnum text-ui text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
+                    )}
+                  </Row>
+                ) : null}
 
-                {allocation ? (
+                {allocation && data.holdings.length > 0 ? (
                   <Row
                     id="assets-alloc"
                     title="비중"
@@ -330,14 +351,16 @@ export function Assets() {
                       />
                     }
                   >
+                    {/* Out of band is a fact to act on, said in words as going
+                        over a budget is - not the red of something failed. */}
                     {offBand.length ? (
                       <p className="flex items-baseline gap-2 text-ui text-ink">
-                        <span aria-hidden className="size-1.5 shrink-0 self-center rounded-full bg-reject" />
-                        비정상
+                        <span aria-hidden className="size-1.5 shrink-0 self-center rounded-full bg-foreground" />
+                        범위 밖
                         <span className="text-aside text-dim">{fixes.join(" · ")}</span>
                       </p>
                     ) : (
-                      <p className="text-ui text-dim">정상</p>
+                      <p className="text-ui text-dim">모두 범위 안</p>
                     )}
                     <div className="mt-3">
                       <DriftColumns allocation={allocation} />
@@ -363,12 +386,13 @@ export function Assets() {
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
                     </p>
-                    {/* A ledger that disagrees with the trades is the one thing said here. */}
+                    {/* A ledger that disagrees with the trades is the one thing
+                        said here: the figure above may be wrong, so it is said
+                        as a failure is. */}
                     {principal.checks?.map((c) => (
-                      <p key={`${c.kind}-${c.date ?? ""}`} className="mt-1 text-aside leading-relaxed text-dim">
-                        <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
+                      <Failed key={`${c.kind}-${c.date ?? ""}`} quiet className="mt-1">
                         {c.message}
-                      </p>
+                      </Failed>
                     ))}
                     {principal.outflows ? <OutflowSummary outflows={principal.outflows} /> : null}
                   </Row>
@@ -403,9 +427,11 @@ export function Assets() {
                             active
                               .map((o) => `${data.holdings.find((h) => h.symbol === o.symbol)?.name ?? o.symbol} $${o.limitPrice.toFixed(2)} ${o.side === "buy" ? "이하 매수" : "이상 매도"}`)
                               .join(", ")
-                          : record.orders[0]
-                            ? `최근 ${dayLabel(dayOf(new Date(record.orders[0].createdAt)))} · ${record.orders.filter((o) => o.status === "placed").length}건 보냄`
-                            : "종목을 누르면 사고팔 수 있어요"}
+                          : lastDay
+                            ? `최근 주문 ${dayLabel(lastDay)} · ${lastDayCount}건`
+                            : data.holdings.length
+                              ? "종목을 누르면 사고팔 수 있어요"
+                              : "아직 낸 주문이 없어요"}
                     </p>
                   )}
                 </Row>
@@ -414,10 +440,21 @@ export function Assets() {
           </div>
 
           <div className="min-w-0 max-lg:mt-8">
-            {data && data.holdings.length > 0 ? (
+            {data ? (
               <section aria-label="보유 종목">
                 <p className="mb-1 px-2 text-aside text-faint">보유</p>
                 <div className="space-y-0.5">
+                  {/* No holding is said in the holdings' place only - the cash
+                      under it is held all the same. Not when an account was
+                      not read: that is said above, and "none" would contradict it. */}
+                  {data.holdings.length === 0 && data.problems.length === 0 ? (
+                    <Empty align="start" className="px-2 py-4">
+                      <EmptyHeader>
+                        <EmptyTitle>보유 중인 종목이 없어요</EmptyTitle>
+                        <EmptyDescription>업비트나 한국투자에서 사면 여기에 나타나요.</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : null}
                   {data.holdings.map((h) => {
                     const profit = profitOf(h);
                     const gain = profit >= 0;
@@ -429,8 +466,10 @@ export function Assets() {
                         key={h.id}
                         data-focus={`holding:${h.id}`}
                         onClick={() => setOrdering({ holding: h, at: data.at, usdKrw: data.usdKrw })}
-                        aria-label={`${h.name} 주문`}
-                        className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-glass focus-ring"
+                        // Named by what it shows, its figures and all - a
+                        // label of "… 주문" had hidden every one of them.
+                        aria-haspopup="dialog"
+                        className="group flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-glass focus-ring"
                       >
                         <span className="block min-w-0 flex-1">
                           <span className="block truncate text-body text-ink">
@@ -466,6 +505,10 @@ export function Assets() {
                             </span>
                           ) : null}
                         </span>
+                        <span className="sr-only">주문 열기</span>
+                        {/* The arrow a row that opens a sheet has (summary.tsx Row):
+                            a holding opens its orders, the cash under it nothing. */}
+                        <ChevronRight aria-hidden className="size-4 shrink-0 self-center text-faint group-hover:text-dim" />
                       </button>
                     );
                   })}
@@ -498,6 +541,8 @@ export function Assets() {
                             <p className="tnum mt-0.5 text-meta text-faint">{krw(c.valueKrw)}</p>
                           ) : null}
                         </div>
+                        {/* The arrow's room, so the figures stay one column. */}
+                        <span aria-hidden className="size-4 shrink-0" />
                       </div>
                     ))}
                   {(data.fixed ?? []).map((f) => (
@@ -510,23 +555,17 @@ export function Assets() {
                         </p>
                       </div>
                       <p className="tnum shrink-0 text-right text-body text-ink">{krw(f.valueKrw)}</p>
+                      <span aria-hidden className="size-4 shrink-0" />
                     </div>
                   ))}
                 </div>
               </section>
-            ) : !loading && !error && data ? (
-              <Empty align="start" className="py-6">
-                <EmptyHeader>
-                  <EmptyTitle>보유 중인 종목이 없어요</EmptyTitle>
-                  <EmptyDescription>업비트나 증권 계좌에 자산이 생기면 여기에 나타나요.</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
             ) : null}
           </div>
 
           {/* The whole pot over time - its size and its return - not any
               one holding's price. Below everything, across both columns. */}
-          {data && data.holdings.length > 0 ? (
+          {data ? (
             <section aria-labelledby="assets-track-title" className="mt-10 lg:col-span-2">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <h2 id="assets-track-title" className="text-ui text-dim">
@@ -534,7 +573,7 @@ export function Assets() {
                 </h2>
                 {first && track.length >= 2 ? (
                   <p className="tnum text-aside text-faint">
-                    {Number(first.date.slice(5, 7))}/{Number(first.date.slice(8, 10))}부터{" "}
+                    {monthDay(first.date)}부터{" "}
                     <span className="whitespace-nowrap">
                       {krw(first.totalKrw)} → {krw(data.totalKrw)}
                     </span>{" "}
