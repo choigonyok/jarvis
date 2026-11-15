@@ -14,6 +14,7 @@ import { VolumeBar } from "@/components/workout/volume-bar";
 import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
+import { useRole } from "@/components/shell/role";
 import { TabBar } from "@/components/shell/tab-bar";
 import { ScreenMenu } from "@/components/shell/screen-menu";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -78,8 +79,11 @@ export function Workout() {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
 
-  const w = useWorkout();
-  const { book, routines, live, elsewhere, readAt, readError, unsent } = w;
+  // The book is the two people's; what this screen reads from it is the
+  // signed-in one's (lib/use-workout.ts).
+  const me = useRole();
+  const w = useWorkout(me);
+  const { book, sessions, routines, live, elsewhere, partner, readAt, readError, unsent } = w;
 
   const [editing, setEditing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
@@ -114,10 +118,10 @@ export function Workout() {
 
   const past = useMemo(
     () =>
-      book.sessions
+      sessions
         .filter((s) => s.endedAt)
         .sort((a, b) => b.startedAt - a.startedAt),
-    [book.sessions],
+    [sessions],
   );
 
   // Reading the clock during render is impure: the server and the hydrating
@@ -204,9 +208,9 @@ export function Workout() {
           {live ? (
             <LiveSession
               session={live}
-              // Not a session running on another phone: those sets are not
-              // yet anybody's 지난번 or 최고 기록.
-              history={book.sessions.filter((s) => s.endedAt || s.id === live.id)}
+              // This person's own. Not a session running on another phone:
+              // those sets are not yet anybody's 지난번 or 최고 기록.
+              history={sessions.filter((s) => s.endedAt || s.id === live.id)}
               restTarget={book.restTarget ?? 90}
               onRestTarget={w.setRestTarget}
               onAddExercise={(name) => w.addExercise(live.id, name)}
@@ -242,6 +246,7 @@ export function Workout() {
               <ViewTabs />
 
               <TabsContent value="today">
+                  {partner ? <PartnerLifting session={partner} /> : null}
                   {elsewhere ? (
                     <Elsewhere
                       session={elsewhere}
@@ -251,7 +256,7 @@ export function Workout() {
                   <section aria-label="루틴" className="mb-10">
                     <RoutinePicker
                       routines={routines}
-                      sessions={book.sessions}
+                      sessions={sessions}
                       onStart={(routine) => w.startRoutine(routine)}
                       onFree={() => w.startSession()}
                       // Same movements, maybe a little more weight - that is what
@@ -370,7 +375,7 @@ export function Workout() {
               <TabsContent value="log" asChild>
                 <section>
                   <WorkoutCalendar
-                    sessions={book.sessions}
+                    sessions={sessions}
                     selected={day}
                     onSelect={setDay}
                   />
@@ -433,12 +438,12 @@ export function Workout() {
         open={editing}
         onOpenChange={setEditing}
         routines={routines}
-        sessions={book.sessions}
+        sessions={sessions}
         onSave={w.saveRoutines}
       />
       <ExerciseHistory
         name={looking}
-        sessions={book.sessions}
+        sessions={sessions}
         onOpenChange={(o) => !o && setLooking(null)}
       />
 
@@ -496,9 +501,25 @@ function ViewTabs() {
 }
 
 /**
- * A session running that this device did not start: the partner's, or this
- * person's on another phone. Said, with the way to carry it on here - not
- * opened as this one's own, which put the partner's sets under this thumb.
+ * The partner working out now: who, which day, since when - in their colour,
+ * and a line, not a way in. Those sets are theirs to tick; 시작 below is this
+ * person's own.
+ */
+function PartnerLifting({ session }: { session: Session }) {
+  const now = useNow(60_000);
+  return (
+    <p className="tnum mb-6 text-aside leading-relaxed text-dim">
+      <span className="font-medium text-partner">상대</span>가 운동 중이에요 · {session.routineName ?? "운동"} ·{" "}
+      {ago(new Date(session.startedAt), new Date(now))} 시작
+    </p>
+  );
+}
+
+/**
+ * A session running from before sessions said whose they were, that this
+ * device did not start: the partner's, or this person's on another phone.
+ * Said, with the way to carry it on here - not opened as this one's own,
+ * which put the partner's sets under this thumb.
  */
 function Elsewhere({ session, onContinue }: { session: Session; onContinue: () => void }) {
   const now = useNow(60_000);
@@ -806,8 +827,8 @@ const GOAL_KEY = "jarvis.workout.weeklyGoal";
 
 /**
  * The habit, before the numbers: this week against a weekly goal, and the
- * last eight weeks as bars against the same line. The goal is this device's
- * (the book is shared with the guest; a target is one person's).
+ * last eight weeks as bars against the same line. The weeks count this
+ * person's sessions (`past`, never the partner's); the goal is this device's.
  */
 function Consistency({ past, now }: { past: Session[]; now: number }) {
   const [goal, setGoal] = useState(3);

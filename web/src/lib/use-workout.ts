@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   carrySets,
+  isOwn,
   routinesOf,
+  seenBy,
   setGroups,
   today,
   type Book,
@@ -13,6 +15,7 @@ import {
   type WorkoutSet,
 } from "@/lib/workout";
 import { onResume } from "@/lib/resume";
+import type { Role } from "@/lib/role";
 import { local } from "@/lib/use-gym";
 
 /**
@@ -42,11 +45,14 @@ type Changes = {
 
 const UNSENT = "jarvis.workout.unsent";
 
-// Which running session is this device's. A session does not say whose it is
-// (the book is one for the two of us), so the first one not yet ended was
-// opened as this phone's own: the partner's workout under this thumb, no 시작
-// for one's own, and a set pressed on it sent this phone's copy over theirs.
-// A device knows the one it started, or the one it was asked to carry on.
+// Which running session is this device's. A session saved before sessions
+// said whose they were (`by`) cannot tell - the book is one for the two of us
+// - and the first one not yet ended was opened as this phone's own: the
+// partner's workout under this thumb, no 시작 for one's own, and a set pressed
+// on it sent this phone's copy over theirs. A device knows the one it started,
+// or the one it was asked to carry on. A session that says whose it is needs
+// none of this - it is that person's on every device of theirs - and the mark
+// only keeps a device on the one it is on, if that person has two running.
 const MINE = "jarvis.workout.mine";
 
 function diff(from: Book, to: Book): Changes | null {
@@ -81,7 +87,8 @@ function overlay(book: Book, changes: Changes): Book {
   };
 }
 
-export function useWorkout() {
+/** The log as `me` (the signed-in role, components/shell/role.tsx) sees and writes it. */
+export function useWorkout(me: Role) {
   const [book, setBook] = useState<Book>({ sessions: [] });
   // When the book was last read, null until it first has been: an empty book
   // that was never read is not an empty log, and is not shown as one.
@@ -96,9 +103,9 @@ export function useWorkout() {
   const saved = useRef<Book>(book);
   const sending = useRef(false);
   const again = useRef(false);
-  const [mine, setMine] = useState<string | null>(() => local.get<string>(MINE));
-  const own = useCallback((id: string) => {
-    setMine(id);
+  const [here, setHere] = useState<string | null>(() => local.get<string>(MINE));
+  const carry = useCallback((id: string) => {
+    setHere(id);
     local.set(MINE, id);
   }, []);
 
@@ -151,7 +158,7 @@ export function useWorkout() {
       // Another tab of this browser may have started one since. Storage that
       // keeps nothing leaves this page's own as it was.
       const stored = local.get<string>(MINE);
-      if (stored) setMine(stored);
+      if (stored) setHere(stored);
       latest.current = next;
       saved.current = data;
       setReadAt(new Date());
@@ -227,13 +234,12 @@ export function useWorkout() {
     };
   }, []);
 
-  const running = book.sessions.filter((s) => !s.endedAt);
-  const live = running.find((s) => s.id === mine) ?? null;
-  // Running and not this device's: the partner's, or one started on another
-  // phone. Not opened here unless asked, and never ended or written over.
-  const elsewhere = live
-    ? null
-    : running.reduce<Session | null>((a, s) => (!a || s.startedAt > a.startedAt ? s : a), null);
+  // The viewer's sessions, their running one, one from before `by` running
+  // on another device, and the partner's running one (lib/workout.ts seenBy).
+  const { sessions, live, elsewhere, partner } = useMemo(
+    () => seenBy(book.sessions, me, here),
+    [book.sessions, me, here],
+  );
 
   /**
    * Carry on here a session started elsewhere - this person's own, begun on
@@ -241,10 +247,10 @@ export function useWorkout() {
    */
   const continueHere = useCallback(
     (id: string) => {
-      own(id);
+      carry(id);
       void reload();
     },
-    [own, reload],
+    [carry, reload],
   );
 
   /**
@@ -269,12 +275,15 @@ export function useWorkout() {
           sets: e.sets.map((set) => ({ ...set, done: false })),
         })),
         startedAt: Date.now(),
+        // This person's before the server has it. The server stamps who
+        // made it from the token, whatever this says - the same.
+        by: me,
       };
       update((b) => ({ ...b, sessions: [...b.sessions, session] }));
-      own(session.id);
+      carry(session.id);
       return session.id;
     },
-    [update, own],
+    [update, carry, me],
   );
 
   /**
@@ -288,9 +297,10 @@ export function useWorkout() {
     (routine: Routine) => {
       const stamp = Date.now();
       update((b) => {
-        // From finished sessions only: one running on another phone is
-        // somebody's sets in the making, not this one's last time.
-        const done = b.sessions.filter((s) => s.endedAt);
+        // From this person's finished sessions only: one running on another
+        // phone is somebody's sets in the making, and the partner's are not
+        // this one's last time.
+        const done = b.sessions.filter((s) => s.endedAt && isOwn(s, me));
         const session: Session = {
           id: `w-${stamp}`,
           date: today(),
@@ -302,13 +312,14 @@ export function useWorkout() {
             sets: carrySets(done, name),
           })),
           startedAt: stamp,
+          by: me,
         };
         return { ...b, sessions: [...b.sessions, session] };
       });
-      own(`w-${stamp}`);
+      carry(`w-${stamp}`);
       return `w-${stamp}`;
     },
-    [update, own],
+    [update, carry, me],
   );
 
   const saveRoutines = useCallback(
@@ -392,14 +403,16 @@ export function useWorkout() {
             id: `e-${Date.now()}`,
             name,
             sets: carrySets(
-              latest.current.sessions.filter((other) => other.endedAt || other.id === id),
+              latest.current.sessions.filter(
+                (other) => (other.endedAt && isOwn(other, me)) || other.id === id,
+              ),
               name,
             ),
           },
         ],
       }));
     },
-    [patchSession],
+    [patchSession, me],
   );
 
   /** Put a removed movement back where it was. */
@@ -452,9 +465,11 @@ export function useWorkout() {
 
   return {
     book,
+    sessions,
     routines,
     live,
     elsewhere,
+    partner,
     continueHere,
     readAt,
     readError,

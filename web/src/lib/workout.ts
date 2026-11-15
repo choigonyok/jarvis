@@ -1,3 +1,4 @@
+import type { Role } from "@/lib/role";
 import { dayLabel as whenDayLabel } from "@/lib/when";
 /**
  * A workout is a list of exercises, each a list of sets. That is the whole
@@ -56,7 +57,50 @@ export type Session = {
   note?: string;
   /** kg, logged at most once a day. */
   bodyWeight?: number;
+  /**
+   * Who made it. input-svc stamps it from the token of the save that first
+   * wrote the session, and no later save - by either of the two, or anything a
+   * page sends - changes it. Missing on sessions saved before it was kept.
+   */
+  by?: Role;
 };
+
+/**
+ * Whether `me` counts a session as their own: one they made, or one saved
+ * before a session said who made it - those stay both people's, as they
+ * always were. The partner's are theirs alone: not this one's running
+ * session, 지난번, record, week or goal.
+ */
+export function isOwn(session: Session, me: Role): boolean {
+  return !session.by || session.by === me;
+}
+
+/** The one started last, or null. */
+function newest(sessions: Session[]): Session | null {
+  return sessions.reduce<Session | null>((a, s) => (!a || s.startedAt > a.startedAt ? s : a), null);
+}
+
+/**
+ * The book as `me` reads it on this device. `here` is the running session this
+ * device started or was asked to carry on (lib/use-workout.ts MINE).
+ */
+export function seenBy(all: Session[], me: Role, here: string | null) {
+  // Theirs. Their 지난번, records, weeks and goal are read from these alone -
+  // one person's 100kg bench had been the other's 지난번, filled into the dock.
+  const sessions = all.filter((s) => isOwn(s, me));
+  const running = sessions.filter((s) => !s.endedAt);
+  // Their running session, on every device of theirs: the one this device is
+  // on, else the newest they started. One from before `by` is this device's
+  // only if it started it or was asked to carry it on.
+  const live = running.find((s) => s.id === here) ?? newest(running.filter((s) => s.by === me));
+  // Running from before `by`, and not this device's: the partner's, or one
+  // started on another phone. Not opened here unless asked, and never ended
+  // or written over.
+  const elsewhere = live ? null : newest(running.filter((s) => !s.by));
+  // The partner's, running: a line on 오늘, never this screen's session.
+  const partner = newest(all.filter((s) => !s.endedAt && !isOwn(s, me)));
+  return { sessions, live, elsewhere, partner };
+}
 
 export type Book = {
   sessions: Session[];
