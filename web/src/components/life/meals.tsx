@@ -149,7 +149,7 @@ export function Meals({ meals }: { meals: Meal[] }) {
           {paged.items.map((m) => (
             <li key={m.at + m.merchant} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-ui text-ink">{m.merchant}</span>
+                <span className="block text-ui break-keep text-pretty [overflow-wrap:anywhere] text-ink">{m.merchant}</span>
                 <span className="tnum block text-meta text-faint">
                   {moment(m.at)} · {m.slot} · {WAYS.find((w) => w.way === wayOf(m))!.label}
                 </span>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -14,11 +15,14 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { usePaged } from "@/lib/paging";
+import { type CheckState, type StatusReport, held, readStatus } from "@/lib/status";
 import { LIMIT, useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
+import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
 import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
+import { clock } from "@/lib/when";
 
 /**
  * What the collectors have read out of KakaoTalk.
@@ -58,6 +62,9 @@ export function Kakao() {
     } catch {}
     dispatchEvent(new Event("jarvis:messages-source"));
   };
+  // Whether the collectors are collecting, as the 상태 tab knows it: read
+  // once for both messengers, and every minute while the page is on screen.
+  const status = useResource("status", readStatus, { interval: 60_000 });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -75,7 +82,7 @@ export function Kakao() {
         </div>
         {/* Each source keeps its own rooms and scroll; switching starts fresh. */}
         <TabsContent value={source} className="flex min-h-0 flex-1 flex-col">
-          <Feed key={source} source={source} />
+          <Feed key={source} source={source} report={status.data} />
         </TabsContent>
       </Tabs>
       <TabBar pending={pending} />
@@ -83,15 +90,17 @@ export function Kakao() {
   );
 }
 
-function Feed({ source }: { source: Source }) {
-  const { rooms, selected, setSelected, messages, loading, error, readAt, hydrated, reload } = useKakao(source);
+function Feed({ source, report }: { source: Source; report?: StatusReport }) {
+  const { rooms, selected, setSelected, messages, loading, error, missing, readAt, hydrated, reload } = useKakao(source);
   // A read again that fails leaves the conversation on screen, said to be
   // from when it was read: one poll lost in a tunnel had put "불러오지
   // 못했어요" in its place until the next, and it came back at its top. Only
-  // what never came is the failure in its place - an iMessage collector not
-  // set up yet says how to set it up instead.
+  // what never came is the failure in its place - except an iMessage
+  // collector that is not there, which is not set up yet and says how. Every
+  // other iMessage failure had said that too, and a Mac mini restarting sent
+  // the operator off to set up again what was working.
   const stale = error !== null && rooms.length > 0 && !loading;
-  const failed = error !== null && (rooms.length > 0 ? loading : source !== "imessage");
+  const failed = error !== null && (rooms.length > 0 ? loading : !(source === "imessage" && missing));
 
   // 방을 열면 맨 아래(최근 대화)로. 그 뒤 수집이 새로 고칠 때는, 이미 맨
   // 아래를 보고 있을 때만 따라 내려간다 - 위로 올려 읽던 사람을 몇 초마다
@@ -113,6 +122,18 @@ function Feed({ source }: { source: Source }) {
     shownRoom.current = selected;
     lastKey.current = key;
   }, [messages, selected]);
+  // The lines over the conversation come and go - a read that failed, the
+  // collector's - and one that comes while the newest is in view must not
+  // push it out of view.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const keep = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    keep.observe(el);
+    return () => keep.disconnect();
+  }, []);
 
   return (
     <>
@@ -131,6 +152,7 @@ function Feed({ source }: { source: Source }) {
           </div>
         ) : null}
         {stale ? <AsOf at={readAt} failed onRetry={() => void reload()} className="shrink-0 pb-1" /> : null}
+        <Collecting source={source} report={report} />
 
         <div
           ref={scroller}
@@ -179,7 +201,7 @@ function Feed({ source }: { source: Source }) {
                 <p className="pt-2 text-center text-meta text-faint">최근 {LIMIT}개만 보여요</p>
               ) : null}
               {messages.map((m, i) => (
-                <Line key={i} message={m} previous={messages[i - 1]} />
+                <Line key={m.id} message={m} previous={messages[i - 1]} />
               ))}
             </div>
           )}
@@ -187,6 +209,57 @@ function Feed({ source }: { source: Source }) {
       </main>
     </>
   );
+}
+
+/**
+ * Whether what is here is still coming, from the 상태 tab's checks. A
+ * KakaoTalk stuck on the Mac's update window for two days and a quiet two
+ * days drew the same screen: nothing new, the last messages as if current.
+ * So one line under the rooms says the collector was reading as of when -
+ * or that it is not, or that nothing has come in for long, with the way to
+ * the check that says why.
+ */
+function Collecting({ source, report }: { source: Source; report?: StatusReport }) {
+  const said = collecting(source, report);
+  if (!said) return null;
+  const fault = said.state === "fail";
+  return (
+    <p className={cn("tnum shrink-0 pb-1 text-meta", fault ? "text-reject" : said.state === "warn" ? "text-dim" : "text-faint")}>
+      {said.text}
+      {said.check ? (
+        <>
+          {" · "}
+          <Link
+            href={`/status?focus=check:${said.check}`}
+            className={cn(
+              "tap-y underline underline-offset-[3px] focus-ring",
+              fault ? "decoration-reject-fill hover:text-reject" : "decoration-edge hover:text-foreground",
+            )}
+          >
+            상태 보기
+          </Link>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+/** The collector's line for a messenger, from the report: nothing when the checks have not said. */
+function collecting(source: Source, report?: StatusReport): { state: CheckState; text: string; check?: string } | null {
+  if (!report) return null;
+  const check = (id: string) => report.results.find((r) => r.id === id);
+  const reader = check(source === "kakao" ? "kakao.collector" : "imessage.collector");
+  if (reader && (reader.state === "fail" || reader.state === "warn")) {
+    return { state: reader.state, text: `수집기가 ${held(reader.since)} 읽지 못하고 있어요`, check: reader.id };
+  }
+  // A KakaoTalk that is off leaves the collector reading a database that no
+  // longer changes: what tells is that nothing has come in.
+  const heard = source === "kakao" ? check("kakao.messages") : undefined;
+  if (heard?.observedAt && (heard.state === "fail" || heard.state === "warn")) {
+    return { state: heard.state, text: `${held(heard.observedAt)} 새 카톡이 없어요`, check: heard.id };
+  }
+  if (reader?.state === "ok") return { state: "ok", text: `수집 중 · ${clock(reader.checkedAt)} 확인` };
+  return null;
 }
 
 /**
@@ -198,8 +271,9 @@ function Feed({ source }: { source: Source }) {
  * So one line: the room being read, which opens all of them with a search,
  * and then as many of the other recent rooms as fit - a room that does not
  * fit wraps onto a line that is never shown, so there is no half a chip.
+ * Drawn again only when the rooms change, not on every poll of them.
  */
-function RoomPicker({
+const RoomPicker = memo(function RoomPicker({
   rooms,
   selected,
   onSelect,
@@ -336,7 +410,7 @@ function RoomPicker({
       </div>
     </div>
   );
-}
+});
 
 /**
  * A room's place while its messages are read - and on opening, while the
@@ -399,9 +473,10 @@ const LINK = /(https?:\/\/[^\s<>"']*[^\s<>"'.,!?)\]}」』…])/;
 
 /**
  * One message. The date only appears when it changes, so a long day of
- * conversation reads as one block rather than a repeated stamp.
+ * conversation reads as one block rather than a repeated stamp. Drawn again
+ * only when it or the one before it changed (lib/use-kakao.ts keeps both).
  */
-function Line({
+const Line = memo(function Line({
   message,
   previous,
 }: {
@@ -454,4 +529,4 @@ function Line({
       </div>
     </>
   );
-}
+});

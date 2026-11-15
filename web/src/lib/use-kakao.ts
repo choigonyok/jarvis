@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { onResume } from "@/lib/resume";
+import { HttpError } from "@/lib/use-resource";
 
 // The collectors' read-only surfaces, behind the login proxy. The browser never
 // holds their bearer token; the proxy attaches it server-side. KakaoTalk and
@@ -20,6 +21,8 @@ export type KakaoRoom = {
 };
 
 export type KakaoMessage = {
+  /** The collector's message_id: what a line is known by from one read to the next. */
+  id: string;
   room: string;
   date: string;
   time: string;
@@ -74,7 +77,7 @@ export const LIMIT = 200;
 
 async function fetchRooms(api: string): Promise<KakaoRoom[]> {
   const res = await fetch(`${api}/chats?limit=${LIMIT}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) throw new HttpError(res.status);
   const { chats } = (await res.json()) as { chats: ChatWire[] | null };
   return (chats ?? []).map((c) => ({
     id: String(c.chat_id),
@@ -95,6 +98,7 @@ async function fetchMessages(api: string, chatId: string): Promise<KakaoMessage[
   const { messages } = (await res.json()) as { messages: MessageWire[] | null };
   // 수집기는 최신순으로 준다. 화면은 시간순(아래가 최신)이라 뒤집는다.
   return (messages ?? []).slice().reverse().map((m) => ({
+    id: m.message_id,
     room: m.chat_name,
     date: fmtDate(m.sent_at),
     time: fmtTime(m.sent_at),
@@ -106,6 +110,39 @@ async function fetchMessages(api: string, chatId: string): Promise<KakaoMessage[
 
 /** A room whose own messages have not come yet shows none. */
 const NONE: KakaoMessage[] = [];
+
+/**
+ * A room's messages read again, with the very objects on screen kept for
+ * the lines that are the same: a poll that brought nothing new hands back
+ * the list shown, and one that brought a line redraws that line - not the
+ * two hundred, every three seconds.
+ */
+function settle(prev: KakaoMessage[] | undefined, next: KakaoMessage[]): KakaoMessage[] {
+  if (!prev) return next;
+  const before = new Map(prev.map((m) => [m.id, m]));
+  let same = prev.length === next.length;
+  const out = next.map((m, i) => {
+    const old = before.get(m.id);
+    const kept =
+      old && old.text === m.text && old.sender === m.sender && old.mine === m.mine && old.date === m.date && old.time === m.time
+        ? old
+        : m;
+    if (kept !== prev[i]) same = false;
+    return kept;
+  });
+  return same ? prev : out;
+}
+
+/** The rooms read again are the ones shown: the list on screen stays as it is. */
+function sameRooms(a: KakaoRoom[], b: KakaoRoom[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((r, i) => {
+      const o = b[i];
+      return r.id === o.id && r.name === o.name && r.messages === o.messages && r.lastDate === o.lastDate && r.lastTime === o.lastTime;
+    })
+  );
+}
 
 /**
  * Reads what the Mac-side collector stored. Polls rather than streams: this
@@ -123,8 +160,9 @@ export function useKakao(source: Source = "kakao") {
   const [roomsAt, setRoomsAt] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [shown, setShown] = useState<{ room: string; list: KakaoMessage[]; at: number } | null>(null);
-  // What failed last: the rooms, or one room's messages - said for that room only.
-  const [error, setError] = useState<{ text: string; room?: string } | null>(null);
+  // What failed last: the rooms (with the status they were answered with, if
+  // any), or one room's messages - said for that room only.
+  const [error, setError] = useState<{ text: string; room?: string; status?: number } | null>(null);
   const [hydrated, setHydrated] = useState(false);
   // The room chosen, as an answer coming back checks it.
   const wanted = useRef<string | null>(null);
@@ -133,15 +171,15 @@ export function useKakao(source: Source = "kakao") {
     () =>
       fetchRooms(API).then(
         (data) => {
-          setRooms(data);
+          setRooms((prev) => (sameRooms(prev, data) ? prev : data));
           setRoomsAt(Date.now());
           setError(null);
           // 처음 들어왔을 때는 가장 최근 방을 연다.
           setSelected((cur) => cur ?? data[0]?.id ?? null);
           setHydrated(true);
         },
-        () => {
-          setError({ text: "수집된 대화를 불러오지 못했어요." });
+        (err: unknown) => {
+          setError({ text: "수집된 대화를 불러오지 못했어요.", status: err instanceof HttpError ? err.status : undefined });
           setHydrated(true);
         },
       ),
@@ -154,7 +192,8 @@ export function useKakao(source: Source = "kakao") {
       fetchMessages(API, chatId).then(
         (list) => {
           if (wanted.current !== chatId) return;
-          setShown({ room: chatId, list, at: Date.now() });
+          const at = Date.now();
+          setShown((prev) => ({ room: chatId, list: settle(prev?.room === chatId ? prev.list : undefined, list), at }));
           setError(null);
         },
         () => {
@@ -164,9 +203,15 @@ export function useKakao(source: Source = "kakao") {
     [API],
   );
 
+  // Only while the page is on screen, as the 상태 tab reads: a phone left on
+  // this tab in a pocket, or a desktop tab under other windows all day, kept
+  // fetching two hundred messages every three seconds. Coming back reads at
+  // once (onResume, below).
   useEffect(() => {
     void loadRooms();
-    const id = setInterval(() => void loadRooms(), 10_000);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") void loadRooms();
+    }, 10_000);
     return () => clearInterval(id);
   }, [loadRooms]);
 
@@ -174,7 +219,9 @@ export function useKakao(source: Source = "kakao") {
     wanted.current = selected;
     if (!selected) return;
     void loadMessages(selected);
-    const id = setInterval(() => void loadMessages(selected), 3_000);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") void loadMessages(selected);
+    }, 3_000);
     return () => clearInterval(id);
   }, [selected, loadMessages]);
 
@@ -197,6 +244,12 @@ export function useKakao(source: Source = "kakao") {
     /** The chosen room's messages are on their way. */
     loading: selected !== null && !own,
     error: error && (error.room === undefined || error.room === selected) ? error.text : null,
+    /**
+     * The rooms were answered that there is no such collector (404, 501): one
+     * not set up, rather than one that failed - a Mac mini restarting answers
+     * 502.
+     */
+    missing: error?.room === undefined && (error?.status === 404 || error?.status === 501),
     /** When what is shown was read. */
     readAt: at === null ? null : new Date(at),
     hydrated,

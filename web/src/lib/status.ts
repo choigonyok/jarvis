@@ -1,3 +1,5 @@
+import { HttpError } from "@/lib/use-resource";
+
 export type CheckState = "ok" | "warn" | "fail" | "unknown";
 
 export type CheckResult = {
@@ -26,6 +28,16 @@ export type StatusReport = {
   results: CheckResult[];
   now: string;
 };
+
+/**
+ * What status-svc last found, as the 상태 tab reads it - without making it
+ * look again. For a screen that says how one of its sources stands.
+ */
+export async function readStatus(signal?: AbortSignal): Promise<StatusReport> {
+  const res = await fetch("/api/status/status", { cache: "no-store", signal });
+  if (!res.ok) throw new HttpError(res.status);
+  return (await res.json()) as StatusReport;
+}
 
 /** "방금", "3분 전", "5시간 전", "3일 전". Ages here run to weeks, so days
  *  stay days rather than turning into a date - "3일 전" is the finding. */

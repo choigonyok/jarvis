@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
@@ -78,6 +79,10 @@ export function Life() {
   // read again - a push, coming back to the app - moves none of them, not the
   // one whose why is being typed.
   const [asked, setAsked] = useState<ReadonlySet<string> | null>(null);
+  // The notes answered on this visit, kept for both lists: one let go in the
+  // sheet that is also among the three here had been folded away here on
+  // closing the sheet, as if let go before.
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
 
   const load = useCallback(
     () =>
@@ -125,6 +130,7 @@ export function Life() {
   }, []);
 
   function changed(next: Note) {
+    setAnswered((cur) => new Set(cur).add(next.id));
     setBook((b) => {
       const notes = b?.notes;
       if (!b || !notes?.data) return b;
@@ -155,7 +161,7 @@ export function Life() {
 
               {book.notes.data?.some((n) => asked?.has(n.id)) ? (
                 <div className="mt-5">
-                  <Notes notes={book.notes.data.filter((n) => asked?.has(n.id))} onChange={changed} />
+                  <Notes notes={book.notes.data.filter((n) => asked?.has(n.id))} answered={answered} onChange={changed} />
                 </div>
               ) : null}
 
@@ -173,7 +179,7 @@ export function Life() {
                   ) : book.notes.data!.length === 0 ? (
                     <Empty>밤마다 반복되는 일과 빗나간 예측에서 노트가 생겨요.</Empty>
                   ) : (
-                    <Notes notes={book.notes.data!} onChange={changed} />
+                    <Notes notes={book.notes.data!} answered={answered} onChange={changed} />
                   )}
                 </DetailRow>
 
@@ -338,7 +344,7 @@ function Places({ places }: { places: Place[] }) {
         return (
           <li key={`${p.type}:${p.name}`} className="py-3">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate text-body text-ink">{p.name}</span>
+              <span className="min-w-0 text-body break-keep text-pretty [overflow-wrap:anywhere] text-ink">{p.name}</span>
               <span className="tnum shrink-0 text-ui text-ink">
                 {p.score.toFixed(1)}
                 <span className="text-meta text-faint"> / 5</span>
@@ -414,7 +420,7 @@ function Things({ things }: { things: Thing[] }) {
                     {t.bought.length > 1 ? ` · ${t.bought.length}번` : ""}
                   </span>
                 </div>
-                <p className="mt-0.5 truncate text-aside text-faint">{t.items.join(", ")}</p>
+                <Items items={t.items} className="text-faint" />
               </li>
             );
           }
@@ -430,12 +436,47 @@ function Things({ things }: { things: Thing[] }) {
               <p className="mt-0.5 text-aside text-faint">
                 보통 {t.cycleDays}일마다 · 마지막 {shortDate(t.bought[t.bought.length - 1] ?? t.last)} · 반년에 {t.bought.length}번
               </p>
-              <p className="mt-0.5 truncate text-aside text-dim">{t.items.join(", ")}</p>
+              <Items items={t.items} className="text-dim" />
             </li>
           );
         })}
       </ul>
       <Pager {...paged} unit="종" />
     </div>
+  );
+}
+
+/**
+ * The names of what was bought of a kind, all of them. Cut to one line they
+ * showed the start of the first product's name - no size, and none of the
+ * others - with no way to read on. One name wraps whole; several show two
+ * lines, and the line pressed lists them all, one to a line.
+ */
+function Items({ items, className }: { items: string[]; className?: string }) {
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  if (items.length === 1) {
+    return <p className={cn("mt-0.5 text-aside break-keep text-pretty [overflow-wrap:anywhere]", className)}>{items[0]}</p>;
+  }
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={() => setOpen((o) => !o)}
+      className={cn("tap-y mt-0.5 flex w-full items-start gap-2 text-left text-aside focus-ring", className)}
+    >
+      {open ? (
+        <span className="min-w-0 flex-1 space-y-0.5 break-keep text-pretty [overflow-wrap:anywhere]">
+          {items.map((item, i) => (
+            <span key={i} className="block">
+              {item}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="line-clamp-2 min-w-0 flex-1 break-keep [overflow-wrap:anywhere]">{items.join(", ")}</span>
+      )}
+      <ChevronDown aria-hidden className={cn("mt-1 size-3.5 shrink-0 text-faint transition-transform", open && "rotate-180")} />
+    </button>
   );
 }

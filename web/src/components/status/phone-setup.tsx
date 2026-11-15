@@ -88,7 +88,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
             OwnTracks를 설치해요.{" "}
             <a
               href="https://apps.apple.com/app/id692424691"
-              className="text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground"
+              className="tap-y text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
             >
               App Store
             </a>

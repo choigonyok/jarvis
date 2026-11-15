@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
+import { Failed } from "@/components/shell/failed";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -30,13 +31,23 @@ import { cn } from "@/lib/utils";
  * why. A note let go is not removed but struck through, as a cancelled
  * charge is in 가계부, and folded away below the rest.
  */
-export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) => void }) {
+export function Notes({
+  notes,
+  answered,
+  onChange,
+}: {
+  notes: Note[];
+  /**
+   * The notes answered on this visit, in either list (life.tsx): a note let
+   * go a moment ago stays where it was until the next visit - a row that
+   * jumps away on its own answer reads as an undo. The ones let go before
+   * are folded.
+   */
+  answered: ReadonlySet<string>;
+  onChange: (n: Note) => void;
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const [showRejected, setShowRejected] = useState(false);
-  // A note let go a moment ago stays where it was until the next visit: a
-  // row that jumps away on its own answer reads as an undo. The ones let go
-  // before are folded.
-  const [answered, setAnswered] = useState<Set<string>>(new Set());
   const tucked = notes.filter((n) => n.status === "rejected" && !answered.has(n.id) && n.id !== open);
   const fold = tucked.length > 0 && !showRejected;
   const visible = useMemo(
@@ -56,10 +67,7 @@ export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) 
           note={n}
           open={open === n.id}
           onToggle={() => setOpen(open === n.id ? null : n.id)}
-          onChange={(next) => {
-            setAnswered((cur) => new Set(cur).add(next.id));
-            onChange(next);
-          }}
+          onChange={onChange}
         />
       ))}
       {fold && paged.page === paged.pageCount ? (
@@ -99,17 +107,44 @@ function NoteRow({
 }) {
   // What the row is doing: answering "아니에요" (with why), rewording, or neither.
   const [mode, setMode] = useState<"idle" | "why" | "edit">("idle");
+  // Where it was asked for: the buttons by the note, or the ones under its
+  // grounds and history. The form, and what is said of the answer, are drawn
+  // there: from under a long history the form had opened up by the note, far
+  // above the button pressed, pushing what was read down past it.
+  const [under, setUnder] = useState(false);
+  const begin = (m: "why" | "edit", fromUnder: boolean) => {
+    setUnder(fromUnder);
+    setMode(m);
+  };
+  const form = useRef<HTMLFormElement>(null);
+  const reason = useRef<HTMLInputElement>(null);
+  const wording = useRef<HTMLTextAreaElement>(null);
+  // The button pressed goes as the form comes, and the keyboard's focus with
+  // it: into the form instead. 고치기 is for typing, so into the sentence; for
+  // 아니에요 a mouse goes into the reason, and a finger only brings the form
+  // into view - a phone's keyboard up over 아니에요 for a reason that may be
+  // left out is in the way.
+  useEffect(() => {
+    if (mode === "edit") wording.current?.focus();
+    else if (mode === "why") {
+      if (matchMedia("(pointer: fine)").matches) reason.current?.focus();
+      else form.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [mode]);
   const [why, setWhy] = useState("");
   const [text, setText] = useState(note.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The answer given on this visit, said where the buttons were.
   const [said, setSaid] = useState<string | null>(null);
-  const [history, setHistory] = useState<Note[] | null | "loading">(null);
+  // Not read, being read, not come (said, with 다시 시도), or read. A failure
+  // had been kept as no history at all: "불러오지 못했어요" with no way back,
+  // and opening the note again did not read again.
+  const [history, setHistory] = useState<Note[] | null | "loading" | "failed">(null);
 
   function loadHistory() {
     setHistory("loading");
-    void readVersions(note.id).then((vs) => setHistory(vs ?? []));
+    void readVersions(note.id).then((vs) => setHistory(vs ?? "failed"));
   }
 
   async function answer(change: { status?: NoteStatus; text?: string; reason?: string }, done: string) {
@@ -129,7 +164,7 @@ function NoteRow({
   }
 
   function toggle() {
-    if (!open && history === null) loadHistory();
+    if (!open && (history === null || history === "failed")) loadHistory();
     onToggle();
   }
 
@@ -143,22 +178,25 @@ function NoteRow({
   const buttons =
     mode !== "idle" ? null : rule ? (
       <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-1.5">
-        <Button variant="reject" size="pair-sm" onClick={() => setMode("why")} disabled={busy}>
+        <Button variant="reject" size="pair-sm" onClick={() => begin("why", false)} disabled={busy}>
           거두기
         </Button>
-        <Button variant="quiet" size="pair-sm" onClick={() => setMode("edit")} disabled={busy} className={later}>
+        <Button variant="quiet" size="pair-sm" onClick={() => begin("edit", false)} disabled={busy} className={later}>
           고치기
         </Button>
       </div>
     ) : asking ? (
       <div className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:flex sm:items-center sm:gap-1.5">
-        <Button variant="reject" size="pair-sm" onClick={() => setMode("why")} disabled={busy}>
+        <Button variant="reject" size="pair-sm" onClick={() => begin("why", false)} disabled={busy}>
           아니에요
         </Button>
         <Button
           variant="approve"
           size="pair-sm"
-          onClick={() => void answer({ status: "confirmed" }, "맞다고 했어요. 예측과 제안에 그대로 써요.")}
+          onClick={() => {
+            setUnder(false);
+            void answer({ status: "confirmed" }, "맞다고 했어요. 예측과 제안에 그대로 써요.");
+          }}
           disabled={busy}
         >
           맞아요
@@ -166,7 +204,7 @@ function NoteRow({
         <Button
           variant="quiet"
           size="pair-sm"
-          onClick={() => setMode("edit")}
+          onClick={() => begin("edit", false)}
           disabled={busy}
           className={later}
         >
@@ -174,6 +212,102 @@ function NoteRow({
         </Button>
       </div>
     ) : null;
+
+  const saidLine =
+    said && mode === "idle" ? (
+      <p role="status" className="anim-settle mt-2 flex items-center gap-1.5 text-aside text-dim">
+        {note.status === "rejected" ? (
+          <X aria-hidden className="size-3.5 text-reject" />
+        ) : (
+          <Check aria-hidden className={cn("size-3.5", note.status === "confirmed" ? "text-approve" : "text-dim")} />
+        )}
+        {said}
+      </p>
+    ) : null;
+
+  const answering = (
+    <>
+      {/* A form, so Enter gives the answer as the button does. */}
+      {mode === "why" ? (
+        <form
+          ref={form}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void answer(
+              { status: "rejected", reason: why.trim() },
+              rule ? "거뒀어요. Jarvis가 더는 따르지 않아요." : "아니라고 했어요. 다시 만들지 않아요.",
+            );
+          }}
+          className="anim-settle mt-2.5 space-y-2"
+        >
+          <p className="text-aside text-dim">
+            {rule
+              ? "거두면 Jarvis가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
+              : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
+          </p>
+          <Input
+            ref={reason}
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+            placeholder={rule ? "예: 이제는 넣어도 돼" : "예: 그날은 비가 와서 그랬어"}
+            aria-label="아닌 이유"
+            enterKeyHint="done"
+            maxLength={300}
+            className="mouse:h-8 mouse:text-ui"
+          />
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+            <Button type="button" variant="quiet" size="pair-sm" onClick={() => setMode("idle")} disabled={busy}>
+              취소
+            </Button>
+            <Button type="submit" variant="refuse" size="pair-sm" disabled={busy}>
+              {rule ? "거두기" : "아니에요"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      {mode === "edit" ? (
+        <div className="anim-settle mt-2.5 space-y-2">
+          <Textarea
+            ref={wording}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            aria-label="노트 문장"
+            rows={2}
+            maxLength={300}
+            className="min-h-[calc(2lh+18px)] resize-none py-2 leading-[1.5]"
+          />
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+            <Button
+              variant="quiet"
+              size="pair-sm"
+              onClick={() => {
+                setMode("idle");
+                setText(note.text);
+              }}
+              disabled={busy}
+            >
+              취소
+            </Button>
+            <Button
+              variant="raised"
+              size="pair-sm"
+              onClick={() => void answer({ text: text.trim(), reason: "문장을 고침" }, "고쳐 두었어요.")}
+              disabled={busy || !text.trim() || text.trim() === note.text}
+            >
+              저장
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="mt-2 text-aside text-reject">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
 
   return (
     <Collapsible asChild open={open} onOpenChange={toggle}>
@@ -196,7 +330,8 @@ function NoteRow({
             </span>
             {note.scope === RULE_SCOPE ? null : (
               <span className={cn("tnum shrink-0 text-ui", gone ? "text-faint" : "text-ink")}>
-                <span className="hidden text-meta text-faint sm:inline">확신 </span>
+                {/* Read out on a phone too, where there is no room to show it. */}
+                <span className="sr-only text-meta text-faint sm:not-sr-only">확신 </span>
                 {pct(note.confidence)}
               </span>
             )}
@@ -223,94 +358,9 @@ function NoteRow({
       </CollapsibleTrigger>
 
       <div className="ms-[19px] me-7">
-        {said && mode === "idle" ? (
-          <p role="status" className="anim-settle mt-2 flex items-center gap-1.5 text-aside text-dim">
-            {note.status === "rejected" ? (
-              <X aria-hidden className="size-3.5 text-reject" />
-            ) : (
-              <Check aria-hidden className={cn("size-3.5", note.status === "confirmed" ? "text-approve" : "text-dim")} />
-            )}
-            {said}
-          </p>
-        ) : null}
-
+        {under ? null : saidLine}
         {buttons ? <div className="mt-2.5">{buttons}</div> : null}
-
-        {mode === "why" ? (
-          <div className="anim-settle mt-2.5 space-y-2">
-            <p className="text-aside text-dim">
-              {rule
-                ? "거두면 Jarvis가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
-                : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
-            </p>
-            <Input
-              value={why}
-              onChange={(e) => setWhy(e.target.value)}
-              placeholder={rule ? "예: 이제는 넣어도 돼" : "예: 그날은 비가 와서 그랬어"}
-              aria-label="아닌 이유"
-              maxLength={300}
-              className="mouse:h-8 mouse:text-ui"
-            />
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-              <Button variant="quiet" size="pair-sm" onClick={() => setMode("idle")} disabled={busy}>
-                취소
-              </Button>
-              <Button
-                variant="refuse"
-                size="pair-sm"
-                onClick={() =>
-                  void answer(
-                    { status: "rejected", reason: why.trim() },
-                    rule ? "거뒀어요. Jarvis가 더는 따르지 않아요." : "아니라고 했어요. 다시 만들지 않아요.",
-                  )
-                }
-                disabled={busy}
-              >
-                {rule ? "거두기" : "아니에요"}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {mode === "edit" ? (
-          <div className="anim-settle mt-2.5 space-y-2">
-            <Textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              aria-label="노트 문장"
-              rows={2}
-              maxLength={300}
-              className="min-h-[calc(2lh+18px)] resize-none py-2 leading-[1.5]"
-            />
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-              <Button
-                variant="quiet"
-                size="pair-sm"
-                onClick={() => {
-                  setMode("idle");
-                  setText(note.text);
-                }}
-                disabled={busy}
-              >
-                취소
-              </Button>
-              <Button
-                variant="raised"
-                size="pair-sm"
-                onClick={() => void answer({ text: text.trim(), reason: "문장을 고침" }, "고쳐 두었어요.")}
-                disabled={busy || !text.trim() || text.trim() === note.text}
-              >
-                저장
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {error ? (
-          <p role="alert" className="mt-2 text-aside text-reject">
-            {error}
-          </p>
-        ) : null}
+        {under ? null : answering}
       </div>
 
       <CollapsibleContent className="anim-settle mt-3 mb-1 ms-[19px] space-y-3 border-s border-edge ps-4 text-aside leading-[1.6] break-keep">
@@ -331,8 +381,12 @@ function NoteRow({
             <p className="text-faint">고친 이력</p>
             {history === "loading" || history === null ? (
               <p className="text-faint">{SAY.loading}</p>
+            ) : history === "failed" ? (
+              <Failed quiet onRetry={loadHistory} className="mt-0.5">
+                이력을 불러오지 못했어요.
+              </Failed>
             ) : history.length === 0 ? (
-              <p className="text-faint">이력을 불러오지 못했어요.</p>
+              <p className="text-faint">아직 고친 적이 없어요.</p>
             ) : (
               <ol className="space-y-1 text-dim">
                 {[...history].reverse().map((v) => (
@@ -348,24 +402,32 @@ function NoteRow({
             )}
           </div>
 
+          {under ? saidLine : null}
           {!asking && mode === "idle" ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {gone ? (
-                <TextButton onClick={() => void answer({ status: "hypothesis", reason: "아니라고 한 것을 거둠" }, "다시 확인 전으로 두었어요.")} disabled={busy}>
+                <TextButton
+                  onClick={() => {
+                    setUnder(true);
+                    void answer({ status: "hypothesis", reason: "아니라고 한 것을 거둠" }, "다시 확인 전으로 두었어요.");
+                  }}
+                  disabled={busy}
+                >
                   아니라고 한 것 거두기
                 </TextButton>
               ) : (
                 <>
-                  <TextButton onClick={() => setMode("edit")} disabled={busy}>
+                  <TextButton onClick={() => begin("edit", true)} disabled={busy}>
                     고치기
                   </TextButton>
-                  <TextButton onClick={() => setMode("why")} disabled={busy}>
+                  <TextButton onClick={() => begin("why", true)} disabled={busy}>
                     아니에요
                   </TextButton>
                 </>
               )}
             </div>
           ) : null}
+          {under ? answering : null}
       </CollapsibleContent>
     </li>
     </Collapsible>

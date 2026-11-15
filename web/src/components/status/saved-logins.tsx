@@ -18,6 +18,7 @@ import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { API } from "@/lib/thread";
 import { SAY, failureText } from "@/lib/say";
+import { cn } from "@/lib/utils";
 import { dateTime } from "@/lib/when";
 
 type Login = { domain: string; name: string; hint: string; lastUsedAt?: string; uses: number };
@@ -30,6 +31,8 @@ const outcomeCopy: Record<Use["outcome"], string> = {
   failed: "열지 못함",
 };
 
+/** Turned down, or not opened: the outcomes that are a failure, in red. */
+const failedOutcome = (o: string) => o === "refused" || o === "failed";
 
 /** "오늘 14:02", "10월 18일 14:02" - on Seoul's clock, as everywhere (lib/when.ts). */
 const when = (iso: string) => dateTime(iso);
@@ -47,6 +50,9 @@ export function SavedLogins() {
   const [data, setData] = useState<{ logins: Login[]; uses: Use[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
+  // A 지우기 that did not go, said under its own site: at the top of the list
+  // it was out of sight from a row twenty down.
+  const [forgetFailed, setForgetFailed] = useState<{ domain: string; text: string } | null>(null);
   // The sites twenty a page, what was done with them ten.
   const logins = useMemo(() => data?.logins ?? [], [data]);
   const uses = useMemo(() => data?.uses ?? [], [data]);
@@ -72,6 +78,7 @@ export function SavedLogins() {
 
   async function forget(domain: string) {
     setForgetting(domain);
+    setForgetFailed(null);
     try {
       const res = await fetch(`${API}/vault/${encodeURIComponent(domain)}`, { method: "DELETE" });
       if (!res.ok) {
@@ -80,7 +87,7 @@ export function SavedLogins() {
       }
       await load();
     } catch (e) {
-      setError(failureText(e, SAY.couldNotDelete));
+      setForgetFailed({ domain, text: failureText(e, SAY.couldNotDelete) });
     } finally {
       setForgetting(null);
     }
@@ -137,12 +144,18 @@ export function SavedLogins() {
           {loginsPaged.items.map((l) => (
             <li key={l.domain} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-ui text-ink">
-                  {l.name} <span className="text-aside text-faint">{l.domain}</span>
+                {/* The domain under the name, not after it: a long name cut
+                    it off, and it is what to check before 지우기. */}
+                <p className="truncate text-ui text-ink">{l.name}</p>
+                <p className="tnum mt-0.5 text-meta [overflow-wrap:anywhere] text-faint">
+                  {l.domain !== l.name ? `${l.domain} · ` : ""}아이디 {l.hint} ·{" "}
+                  {l.lastUsedAt ? `마지막 사용 ${when(l.lastUsedAt)} · ${l.uses}번` : "아직 안 씀"}
                 </p>
-                <p className="tnum mt-0.5 text-meta text-faint">
-                  아이디 {l.hint} · {l.lastUsedAt ? `마지막 사용 ${when(l.lastUsedAt)} · ${l.uses}번` : "아직 안 씀"}
-                </p>
+                {forgetFailed?.domain === l.domain ? (
+                  <p role="alert" className="mt-1 text-aside text-reject">
+                    {forgetFailed.text}
+                  </p>
+                ) : null}
               </div>
               {/* Asked the way every irreversible 지우기 is (AlertDialog). */}
               <AlertDialog>
@@ -173,13 +186,21 @@ export function SavedLogins() {
       {data.uses.length > 0 ? (
         <div id={usesPaged.anchor} className="scroll-mt-4">
           <p className="mb-1.5 text-aside text-faint">최근에 쓴 기록</p>
-          <ul className="space-y-1">
+          {/* What came of it on the right of the first line, where it is
+              never cut: it is what the list is read for, and at the end of
+              one truncated line it was the first thing lost. Why it was
+              wanted under it, whole. */}
+          <ul className="space-y-2">
             {usesPaged.items.map((u, i) => (
-              <li key={`${u.at}-${i}`} className="tnum flex gap-2 text-aside text-dim">
-                <span className="shrink-0 text-faint">{when(u.at)}</span>
-                <span className="min-w-0 truncate">
-                  {u.host || u.domain} · {u.purpose || "?"} · {outcomeCopy[u.outcome] ?? u.outcome}
-                </span>
+              <li key={`${u.at}-${i}`} className="text-aside">
+                <p className="tnum flex items-baseline gap-2">
+                  <span className="shrink-0 text-faint">{when(u.at)}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink">{u.host || u.domain}</span>
+                  <span className={cn("shrink-0", failedOutcome(u.outcome) ? "text-reject" : "text-dim")}>
+                    {outcomeCopy[u.outcome] ?? "알 수 없음"}
+                  </span>
+                </p>
+                {u.purpose ? <p className="mt-0.5 break-keep text-pretty text-dim">{u.purpose}</p> : null}
               </li>
             ))}
           </ul>

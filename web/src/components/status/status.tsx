@@ -38,6 +38,7 @@ import {
   useUsage,
 } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
+import { monthDay } from "@/lib/when";
 import { PhoneSetup } from "./phone-setup";
 import { SavedLogins } from "./saved-logins";
 
@@ -206,7 +207,7 @@ export function Status() {
                       open={shown === group}
                       onOpenChange={show(group)}
                     >
-                      <Rows rows={rows} open={open} setOpen={setOpen} onPick={reveal} />
+                      <Rows rows={rows} open={open} aim={aim} setOpen={setOpen} onPick={reveal} />
                     </DetailRow>
                   );
                 })}
@@ -509,18 +510,23 @@ function standing(rows: Line[]) {
 function Rows({
   rows,
   open,
+  aim,
   setOpen,
   onPick,
 }: {
   rows: Line[];
   open: string | null;
+  /** The check a notification named, not found on screen yet. */
+  aim: string | null;
   setOpen: (id: string | null) => void;
   onPick: (id: string) => void;
 }) {
   const [showServices, setShowServices] = useState(false);
   const healthyServices = rows.filter((r) => r.id.startsWith("svc.") && r.state === "ok");
-  // Unfold for a notification that points into the fold.
-  const wanted = open && healthyServices.some((r) => r.id === open);
+  // Unfold for a notification that points into the fold - by what it named,
+  // too: a service that answers again by the time it is tapped is folded,
+  // and a folded row is not there for the notification to find and open.
+  const wanted = [open, aim].some((id) => id && healthyServices.some((r) => r.id === id));
   const fold = healthyServices.length > 1 && !showServices && !wanted;
   const visible = fold ? rows.filter((r) => !healthyServices.includes(r)) : rows;
 
@@ -614,7 +620,7 @@ function Row({
                     onPick(r.cause!);
                   }
                 }}
-                className="cursor-pointer text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
+                className="tap-y cursor-pointer text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
               >
                 {r.causeName}
               </span>{" "}
@@ -643,7 +649,7 @@ function Row({
                 <button
                   type="button"
                   onClick={() => onPick("phone")}
-                  className="text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
+                  className="tap-y text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
                 >
                   폰 연결 설정 열기
                 </button>
@@ -670,19 +676,46 @@ function Detail({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
-/** A week of spend as bars, the day under each. */
+/**
+ * A week of spend as bars, the day under each, and under them what the day
+ * picked came to - today's, until another bar is pressed, as a day's bar is
+ * pressed in 가계부. The figures had been in a hover title only, and a phone
+ * has no hover: there it was seven heights and no amounts.
+ */
 function Days({ label, days }: { label: string; days: { day: string; usd: number; note: string }[] }) {
+  const [picked, setPicked] = useState<string | null>(null);
   if (days.length === 0) return null;
   const top = Math.max(...days.map((d) => d.usd), 0.000001);
+  const chosen = days.find((d) => d.day === picked) ?? days[days.length - 1];
   return (
-    <ul className="flex h-12 max-w-[20rem] items-end gap-1.5" aria-label={label}>
-      {days.map((d) => (
-        <li key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day} ${usd(d.usd)} · ${d.note}`}>
-          <span className="block w-full rounded-sm bg-foreground/45" style={{ height: `${Math.max(2, (d.usd / top) * 30)}px` }} />
-          <span className="tnum text-tiny text-faint">{d.day.slice(8)}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="max-w-[20rem]">
+      <ul role="group" aria-label={label} className="flex h-12">
+        {days.map((d) => {
+          const on = d === chosen;
+          return (
+            <li key={d.day} className="flex-1">
+              {/* The whole column is the button, the bars kept apart inside it. */}
+              <button
+                type="button"
+                aria-pressed={on}
+                aria-label={`${monthDay(d.day)} ${usd(d.usd)} · ${d.note}`}
+                onClick={() => setPicked(d.day)}
+                className="flex h-full w-full flex-col items-center justify-end gap-1 rounded-sm px-[3px] focus-ring"
+              >
+                <span
+                  className={cn("block w-full rounded-sm", on ? "bg-foreground/70" : "bg-foreground/45")}
+                  style={{ height: `${Math.max(2, (d.usd / top) * 30)}px` }}
+                />
+                <span className={cn("tnum text-tiny", on ? "text-dim" : "text-faint")}>{d.day.slice(8)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="tnum mt-1.5 text-meta text-faint">
+        {monthDay(chosen.day)} {usd(chosen.usd)} · {chosen.note}
+      </p>
+    </div>
   );
 }
 
