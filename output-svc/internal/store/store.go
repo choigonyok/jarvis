@@ -136,6 +136,9 @@ type Inbox struct {
 	Items []Notification
 	// Unread is how many are unread in all, not on this page.
 	Unread int
+	// UnreadAlert is how many of those are alerts: the console's bell is red
+	// for one of them wherever it is, not only on the page it read.
+	UnreadAlert int
 	// Total is how many there are in all - the console's pages are counted from it.
 	Total int
 }
@@ -153,7 +156,8 @@ func (s *Store) List(ctx context.Context, audience string, limit, offset int) (I
 		return Inbox{}, err
 	}
 	out := Inbox{Items: items}
-	err = s.pool.QueryRow(ctx, `select count(*) filter (where read_at is null), count(*) from output.notifications where audience = $1`, who(audience)).Scan(&out.Unread, &out.Total)
+	err = s.pool.QueryRow(ctx, `select count(*) filter (where read_at is null), count(*) filter (where read_at is null and level = 'alert'), count(*)
+		from output.notifications where audience = $1`, who(audience)).Scan(&out.Unread, &out.UnreadAlert, &out.Total)
 	return out, err
 }
 

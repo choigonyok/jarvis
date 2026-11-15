@@ -119,8 +119,14 @@ export function Notifications() {
         signal,
       });
       if (!res.ok) throw new HttpError(res.status, SAY.couldNotLoad);
-      const body = (await res.json()) as { items: Note[]; unread: number; total?: number };
-      return { notes: body.items, unread: body.unread, total: body.total ?? body.items.length, page: p };
+      const body = (await res.json()) as { items: Note[]; unread: number; unreadAlert?: number; total?: number };
+      return {
+        notes: body.items,
+        unread: body.unread,
+        unreadAlert: body.unreadAlert,
+        total: body.total ?? body.items.length,
+        page: p,
+      };
     },
     { interval: 60_000 },
   );
@@ -132,8 +138,14 @@ export function Notifications() {
   const unread = inbox.data ? inbox.data.unread : lastBell.unread;
   // Red only for an alert not read yet (a service that failed), as in the
   // list below; anything else unread is the grey of a waiting decision. Red
-  // here is 반려 and 실패, and "you have mail" was neither.
-  const alert = inbox.data ? notes.some((n) => !n.readAt && n.level === "alert") : lastBell.alert;
+  // here is 반려 and 실패, and "you have mail" was neither. The count is
+  // output-svc's, of every page; a service from before it sends none, and the
+  // page read is looked through instead - which misses an alert further back.
+  const alert = inbox.data
+    ? inbox.data.unreadAlert !== undefined
+      ? inbox.data.unreadAlert > 0
+      : notes.some((n) => !n.readAt && n.level === "alert")
+    : lastBell.alert;
   useEffect(() => {
     if (inbox.data) lastBell = { unread, alert };
   }, [inbox.data, unread, alert]);
@@ -193,12 +205,16 @@ export function Notifications() {
 
   const markRead = async (ids: number[]) => {
     const before = inbox.data;
+    // The bell's red goes out with the alerts read, at once as the count does.
+    const alerts = notes.filter((n) => !n.readAt && n.level === "alert" && (ids.length === 0 || ids.includes(n.id))).length;
     setUnmarked(false);
     inbox.mutate((cur) =>
       cur && {
         ...cur,
         notes: cur.notes.map((n) => (ids.length === 0 || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)),
         unread: ids.length === 0 ? 0 : Math.max(0, cur.unread - ids.filter((id) => notes.find((n) => n.id === id && !n.readAt)).length),
+        unreadAlert:
+          cur.unreadAlert === undefined ? undefined : ids.length === 0 ? 0 : Math.max(0, cur.unreadAlert - alerts),
       },
     );
     const res = await fetch("/api/notify/notifications/read", {

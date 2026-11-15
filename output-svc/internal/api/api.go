@@ -2,7 +2,7 @@
 // the stack: everything but /health needs the token.
 //
 //	POST   /events              a service reports something (notify.Event)
-//	GET    /notifications       the inbox, newest first, with the unread count
+//	GET    /notifications       the inbox, newest first, with the unread counts
 //	POST   /notifications/read  {ids:[...]} or {} for all
 //	GET    /settings, PUT /settings
 //	GET    /vapid               the public key a browser subscribes with
@@ -225,7 +225,8 @@ func (s *Server) Take(ctx context.Context, m queue.Message) error {
 }
 
 // list is a page of the inbox: ?limit= (default 50, at most 200) after
-// ?offset= rows, with the unread and total counts the console's pages need.
+// ?offset= rows, with the unread and total counts the console's pages need,
+// and how many of the unread are alerts (unreadAlert) for the bell's red.
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 200 {
@@ -241,7 +242,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림함을 읽지 못했습니다."})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": inbox.Items, "unread": inbox.Unread, "total": inbox.Total})
+	writeJSON(w, http.StatusOK, map[string]any{"items": inbox.Items, "unread": inbox.Unread, "unreadAlert": inbox.UnreadAlert, "total": inbox.Total})
 }
 
 func (s *Server) read(w http.ResponseWriter, r *http.Request) {

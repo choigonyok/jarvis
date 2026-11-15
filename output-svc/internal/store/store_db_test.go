@@ -103,6 +103,60 @@ func TestEveryoneHasTheirOwn(t *testing.T) {
 	}
 }
 
+// The bell is red for an unread alert on any page, not only the one read:
+// the count is the person's whole inbox, and an alert read is no longer in it.
+func TestUnreadAlertCountsEveryPage(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	s := New(pool)
+
+	before, err := s.List(ctx, Owner, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestBefore, err := s.List(ctx, Guest, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read int64
+	for _, n := range []Notification{
+		{Audience: Owner, Source: "dbtest", Kind: "status.fail", Tier: "log", Level: "alert", Title: "수집 멈춤", URL: "/"},
+		{Audience: Owner, Source: "dbtest", Kind: "status.fail", Tier: "log", Level: "alert", Title: "읽은 급한 알림", URL: "/"},
+		{Audience: Owner, Source: "dbtest", Kind: "status.warn", Tier: "log", Level: "warn", Title: "주의", URL: "/"},
+		{Audience: Owner, Source: "dbtest", Kind: "spending.daily", Tier: "log", Level: "info", Title: "하루 지출", URL: "/"},
+	} {
+		saved, _, err := s.Insert(ctx, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n.Title == "읽은 급한 알림" {
+			read = saved.ID
+		}
+	}
+	if err := s.MarkRead(ctx, Owner, []int64{read}); err != nil {
+		t.Fatal(err)
+	}
+	// One row a page: the alert is on none of the pages but the count says it.
+	after, err := s.List(ctx, Owner, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.UnreadAlert != before.UnreadAlert+1 || after.Unread != before.Unread+3 {
+		t.Fatalf("안 읽은 급한 알림 %d(전 %d), 안 읽음 %d(전 %d)", after.UnreadAlert, before.UnreadAlert, after.Unread, before.Unread)
+	}
+	if guest, _ := s.List(ctx, Guest, 1, 0); guest.UnreadAlert != guestBefore.UnreadAlert {
+		t.Fatalf("운영자의 급한 알림이 손님 수에 들어갔습니다: %d → %d", guestBefore.UnreadAlert, guest.UnreadAlert)
+	}
+}
+
 // The console reads the inbox a page at a time: pages in a row hold every
 // notification once - none on two pages, none on neither - newest first,
 // with the count they add up to.

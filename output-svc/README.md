@@ -65,7 +65,9 @@ mind 가 승인된 일을 효과 `adapter.call` 로 내면 `internal/calls` 가 
 
 ## 그 밖의 경로 (콘솔용, 게이트웨이 `/notify` 를 거친다)
 
-- `GET /notifications?limit=50` 알림함, `POST /notifications/read` `{ids}` 또는 `{}`(모두)
+- `GET /notifications?limit=50&offset=0` 알림함 한 쪽 `{items, unread, unreadAlert, total}` - 세는 것은 쪽이
+  아니라 그 사람의 알림함 전부다(`unreadAlert` 는 안 읽은 것 중 `level` 이 alert 인 것, 벨의 빨간 점).
+  `POST /notifications/read` `{ids}` 또는 `{}`(모두)
 - `GET /settings`, `PUT /settings` `{muted, quietStart, quietEnd, digestAt}`
 - `GET /vapid` 브라우저가 구독할 공개키, `POST|DELETE /subscriptions`
 - `POST /test` 모든 기기에 시험 푸시
