@@ -136,10 +136,18 @@ export async function standingOrders(): Promise<Standing[] | null> {
   return body?.standing ?? null;
 }
 
-export async function cancelStanding(id: number): Promise<string> {
+/**
+ * Cancel a standing order. failed: today's order at the broker could not be
+ * cancelled and may still fill - the standing order itself is cancelled
+ * either way, and text says which half did not go.
+ */
+export async function cancelStanding(id: number): Promise<{ text: string; failed: boolean }> {
   const res = await fetch(`/api/portfolio/standing/${id}`, { method: "DELETE" }).catch(() => null);
   if (!res) throw new Error(SAY.offline);
-  const body = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+  const body = (await res.json().catch(() => null)) as { message?: string; error?: string; cancelled?: boolean } | null;
   if (!res.ok) throw new Error(body?.error ?? "취소하지 못했어요.");
-  return body?.message ?? "취소했어요";
+  const text = body?.message ?? "취소했어요";
+  // assets-svc answers 200 either way and says which in cancelled; an older
+  // one said it only in its words.
+  return { text, failed: typeof body?.cancelled === "boolean" ? !body.cancelled : text.includes("못했어요") };
 }

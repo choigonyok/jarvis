@@ -395,7 +395,9 @@ async function holdingsNow(): Promise<Holding[]> {
  * GET /standing: the standing orders. POST /standing: a new one
  * ({symbol, side, units, limitPrice | "afford", expiresOn?, reason?}) -
  * "afford" is the highest price the dollars cover. DELETE /standing/<id>:
- * cancel it, and today's order at the broker if it is out.
+ * cancel it, and today's order at the broker if it is out - 200 with
+ * {ok, cancelled, message} whatever the broker said: cancelled is false when
+ * today's order is still out (standing.ts Cancelled).
  */
 async function standing(
   req: import("node:http").IncomingMessage,
@@ -413,7 +415,7 @@ async function standing(
       send(res, 404, { error: "진행 중인 대기 주문이 아닙니다." });
       return;
     }
-    send(res, 200, { ok: true, message: await cancelStanding(o) });
+    send(res, 200, { ok: true, ...(await cancelStanding(o)) });
     return;
   }
   if (req.method !== "POST" || url.pathname !== "/standing") {

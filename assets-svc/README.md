@@ -54,6 +54,7 @@ KIS 가 거래소 코드에 따라 같은 보유를 중복해 돌려준다는 �
 | GET | `/orders?limit=20` | 낸 주문 기록 |
 | POST | `/orders` | `{orders:[{venue, symbol, side, units, amountKrw}], reason, planId?, dryRun?}` 확인(dryRun)하거나 낸다. 답은 `{planId, results, replay}` |
 | POST | `/orders/rebalance` | 지금 리밸런싱 계획을 확인(dryRun)하거나 낸다 |
+| DELETE | `/standing/<id>` | 대기 주문을 취소한다(오늘 증권사에 낸 주문도). 증권사가 무엇이라 하든 200 `{ok, cancelled, message}` - 오늘 주문을 취소하지 못해 아직 증권사에 남아 있으면 `cancelled: false` |
 | GET | `/outflows` | 출금마다 어디로 갔나: 짝 찾은 옮김, 답, 물을 금액, 후보 입금 |
 | POST | `/outflows/answer` | `{key, flowKrw, use, amountKrw, category?, memo?}` 출금의 일부가 어디로 갔는지 적는다 |
 | DELETE | `/outflows/answer?key=` | 그 출금에 답한 것을 지운다(다시 묻게) |

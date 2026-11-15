@@ -110,18 +110,33 @@ export async function affordable(symbol: string, units: number): Promise<{ last:
   return { last: quote.last, excd: quote.excd, price: lo / 100 };
 }
 
+/**
+ * What came of a cancel. cancelled: nothing of the order is left - it is not
+ * placed again, and today's order, if one was out, is cancelled at the broker
+ * too. False when the broker would not cancel today's: that one may still
+ * fill, though the standing order is cancelled either way. message says it.
+ */
+export type Cancelled = { cancelled: boolean; message: string };
+
+/** Today's order at the broker, cancelled. */
+async function cancelAtBroker(o: db.Standing): Promise<void> {
+  const quote = await kisUsQuote(o.symbol);
+  await kisUsCancel({ symbol: o.symbol, excd: quote.excd, odno: o.brokerId!, qty: o.units });
+}
+
 /** Cancel a standing order, and today's order at the broker if it is out. */
-export async function cancelStanding(o: db.Standing, now = new Date()): Promise<string> {
+export async function cancelStanding(o: db.Standing, now = new Date(), broker = cancelAtBroker): Promise<Cancelled> {
   let note = "취소했어요";
+  let cancelled = true;
   if (o.placedOn === nyClock(now).date && o.brokerId) {
     try {
-      const quote = await kisUsQuote(o.symbol);
-      await kisUsCancel({ symbol: o.symbol, excd: quote.excd, odno: o.brokerId, qty: o.units });
+      await broker(o);
       note = "취소했어요 (오늘 낸 주문도 취소)";
     } catch (e) {
+      cancelled = false;
       note = `취소했어요. 오늘 낸 주문은 증권사에서 취소하지 못했어요: ${(e as Error).message.slice(0, 120)}`;
     }
   }
   await db.updateStanding(o.id, { status: "cancelled", message: note });
-  return note;
+  return { cancelled, message: note };
 }

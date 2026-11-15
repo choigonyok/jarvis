@@ -565,11 +565,11 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                           setBusy(o.id);
                           setNote(null);
                           try {
-                            const text = await cancelStanding(o.id);
                             // Cancelled here with today's order still out at the
-                            // broker: assets-svc answers that as done, and says
-                            // in its words ("…취소하지 못했어요") the half that is not.
-                            setNote({ id: o.id, text, failed: text.includes("못했어요") });
+                            // broker is a 200 too: failed says so, and the words
+                            // ("…취소하지 못했어요") say the half that did not go.
+                            const { text, failed } = await cancelStanding(o.id);
+                            setNote({ id: o.id, text, failed });
                             onChanged();
                           } catch (e) {
                             setNote({ id: o.id, text: failureText(e, "취소하지 못했어요."), failed: true });
