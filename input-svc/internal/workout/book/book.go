@@ -43,6 +43,15 @@ type Session struct {
 	EndedAt     *int64     `json:"endedAt,omitempty"` // nil = 진행 중
 	Note        string     `json:"note,omitempty"`
 	BodyWeight  *float64   `json:"bodyWeight,omitempty"`
+	// By is who made the session, person.Owner or person.Guest. The two of
+	// them write one book, and a session that did not say whose it was had
+	// the other's running workout open as one's own and their sets counted as
+	// one's last time. The service stamps it from the token of the save that
+	// first writes the session and keeps it through every later save,
+	// whoever makes it - the operator fixing a set does not make the guest's
+	// workout theirs - and a by sent in a save is not read. Empty on sessions
+	// saved before it was kept: who made those is not known, and not guessed.
+	By string `json:"by,omitempty"`
 }
 
 type Routine struct {
@@ -69,7 +78,8 @@ type Book struct {
 
 // Changes is a partial write: only what changed since the client last saved.
 // Sessions not named here are left alone, which is what lets the guest and the
-// operator write the same book without one wiping the other.
+// operator write the same book without one wiping the other. Who is saving is
+// not in here: it is the token's (Session.By).
 type Changes struct {
 	Sessions   []Session `json:"sessions,omitempty"`
 	Deleted    []string  `json:"deleted,omitempty"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/choigonyok/jarvis/gocommon/person"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
 	"github.com/choigonyok/jarvis/input-svc/internal/workout/book"
 )
@@ -39,7 +40,7 @@ func (s *Server) changeWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	guest := asGuest(r)
-	rev, err := s.views.Workout.Apply(r.Context(), c, func(ctx context.Context, tx pgx.Tx, rev int64, c book.Changes) error {
+	rev, err := s.views.Workout.Apply(r.Context(), madeBy(r), c, func(ctx context.Context, tx pgx.Tx, rev int64, c book.Changes) error {
 		e, err := workoutRecord(c, rev, guest, s.now())
 		if err != nil {
 			return err
@@ -53,6 +54,15 @@ func (s *Server) changeWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", strconv.Quote(strconv.FormatInt(rev, 10)))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision": rev})
+}
+
+// madeBy is who a session first saved by this request is: whose token it came
+// with, never what its body says (book.Session.By).
+func madeBy(r *http.Request) string {
+	if asGuest(r) {
+		return person.Guest
+	}
+	return person.Owner
 }
 
 // workoutRecord is a save as a record, named for the revision it made. What

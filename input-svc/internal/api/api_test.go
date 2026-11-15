@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/person"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	chat "github.com/choigonyok/jarvis/input-svc/internal/chat/store"
@@ -408,6 +410,83 @@ func TestAWorkoutSaveIsARecord(t *testing.T) {
 	}
 	if err := owner.QueryRow(ctx, `select actor from input.guest_records where source = 'workout' and source_key = $1`, fmt.Sprintf("workout:%d", saved.Revision)).Scan(&actor); err != nil || actor != "guest" {
 		t.Fatalf("%q %v", actor, err)
+	}
+}
+
+// Who a save is from is the token's: the services' token is the operator's,
+// the guest's is the guest's.
+func TestASaveIsWhoseTokenItCameWith(t *testing.T) {
+	s := New(nil, token, guestToken, Views{}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var got string
+	h := s.auth(true, func(_ http.ResponseWriter, r *http.Request) { got = madeBy(r) })
+	for _, c := range []struct{ bearer, want string }{{token, person.Owner}, {guestToken, person.Guest}} {
+		got = ""
+		r := httptest.NewRequest(http.MethodPost, "/workout/changes", strings.NewReader("{}"))
+		r.Header.Set("Authorization", "Bearer "+c.bearer)
+		h(httptest.NewRecorder(), r)
+		if got != c.want {
+			t.Fatalf("%s 토큰: %q", c.bearer, got)
+		}
+	}
+}
+
+// A session says who made it: whose token first saved it - not what a save
+// says, and not whoever saved it since. One from before says nothing.
+func TestAWorkoutSessionSaysWhoMadeIt(t *testing.T) {
+	srv, owner := setup(t)
+	ctx := context.Background()
+	save := func(bearer, id string, reps int) {
+		t.Helper()
+		body := fmt.Sprintf(`{"sessions":[{"id":%q,"date":"2026-10-31","startedAt":1793383465000,"by":"owner",
+			"exercises":[{"id":"e1","name":"스쿼트","sets":[{"weight":60,"reps":%d,"done":true}]}]}]}`, id, reps)
+		if code, out := call(t, http.MethodPost, srv.URL+"/workout/changes", bearer, body); code != http.StatusOK {
+			t.Fatalf("%d %s", code, out)
+		}
+	}
+	read := func(id string) map[string]json.RawMessage {
+		t.Helper()
+		code, out := call(t, http.MethodGet, srv.URL+"/workout", token, "")
+		if code != http.StatusOK {
+			t.Fatalf("%d %s", code, out)
+		}
+		var b struct{ Sessions []map[string]json.RawMessage }
+		if err := json.Unmarshal(out, &b); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range b.Sessions {
+			if string(s["id"]) == strconv.Quote(id) {
+				return s
+			}
+		}
+		t.Fatalf("%s 가 없습니다", id)
+		return nil
+	}
+
+	// The guest's, though its save says it is the operator's, and the
+	// operator saving a set of it next does not make it theirs.
+	id := unique("w")
+	save(guestToken, id, 5)
+	save(token, id, 6)
+	if got := read(id); string(got["by"]) != `"guest"` || !strings.Contains(string(got["exercises"]), `"reps":6`) {
+		t.Fatalf("손님의 세션이어야 합니다: %s %s", got["by"], got["exercises"])
+	}
+	mine := unique("w")
+	save(token, mine, 5)
+	if got := read(mine); string(got["by"]) != `"owner"` {
+		t.Fatalf("운영자의 세션: %s", got["by"])
+	}
+
+	// From before: no by at all, and none after a save.
+	old := unique("w")
+	if _, err := owner.Exec(ctx, `insert into input.workout_sessions (id, on_date, started_at) values ($1, '2026-10-01', now())`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := read(old)["by"]; ok {
+		t.Fatal("예전 세션은 주인을 말하지 않습니다")
+	}
+	save(guestToken, old, 5)
+	if _, ok := read(old)["by"]; ok {
+		t.Fatal("저장해도 예전 세션은 주인을 말하지 않습니다")
 	}
 }
 

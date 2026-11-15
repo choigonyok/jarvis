@@ -62,7 +62,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 
 	rows, err := s.pool.Query(ctx, `
 		select id, on_date, coalesce(routine_id,''), coalesce(routine_name,''),
-		       started_at, ended_at, coalesce(note,''), body_weight
+		       started_at, ended_at, coalesce(note,''), body_weight, coalesce(made_by,'')
 		  from input.workout_sessions
 		 order by started_at`)
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 			weight  *float64
 		)
 		if err := rows.Scan(&s0.ID, &onDate, &s0.RoutineID, &s0.RoutineName,
-			&started, &ended, &s0.Note, &weight); err != nil {
+			&started, &ended, &s0.Note, &weight, &s0.By); err != nil {
 			return out, fmt.Errorf("세션 읽기: %w", err)
 		}
 		s0.Date = onDate.Format("2006-01-02")
@@ -229,9 +229,17 @@ func bump(ctx context.Context, tx pgx.Tx) (int64, error) {
 // id, so two writers touching different sessions cannot lose each other's work.
 // after runs in the same transaction, with the revision and what was written:
 // the record of a change and the change land together.
-func (s *Store) Apply(ctx context.Context, c book.Changes, after func(context.Context, pgx.Tx, int64, book.Changes) error) (int64, error) {
+//
+// by is who is saving (person.Owner or person.Guest), from the request's
+// token. A session this save writes first is theirs (book.Session.By); one
+// already there stays whoever's it was. What the sessions say about it
+// themselves is dropped, so it is neither believed nor recorded.
+func (s *Store) Apply(ctx context.Context, by string, c book.Changes, after func(context.Context, pgx.Tx, int64, book.Changes) error) (int64, error) {
 	b := book.Book{Sessions: c.Sessions, Routines: c.Routines}
 	book.Normalize(&b)
+	for i := range b.Sessions {
+		b.Sessions[i].By = ""
+	}
 	c.Sessions = b.Sessions
 
 	tx, err := s.pool.Begin(ctx)
@@ -252,7 +260,7 @@ func (s *Store) Apply(ctx context.Context, c book.Changes, after func(context.Co
 		return 0, err
 	}
 	for _, session := range b.Sessions {
-		if err := saveSession(ctx, tx, session, stored[session.ID]); err != nil {
+		if err := saveSession(ctx, tx, session, stored[session.ID], by); err != nil {
 			return 0, err
 		}
 	}
@@ -314,7 +322,7 @@ func saveRestTarget(ctx context.Context, tx pgx.Tx, seconds *int) error {
 	return nil
 }
 
-func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash string) error {
+func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash, by string) error {
 	hash := s.Fingerprint()
 
 	var ended *time.Time
@@ -324,13 +332,15 @@ func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash stri
 	}
 	// 루틴 id 는 FK 다. 루틴이 지워졌는데 세션이 이름만 들고 있는 경우가
 	// 정상이므로, 존재하지 않는 id 는 NULL 로 떨어뜨린다 - 이름은 남는다.
+	// made_by 는 처음 쓸 때만 넣고 고칠 때는 두지 않는다: 상대가 세트 하나를
+	// 고쳐도 한 사람의 운동이고, 105 전의 세션은 누가 저장하든 비어 있다.
 	if _, err := tx.Exec(ctx, `
 		insert into input.workout_sessions
 		  (id, on_date, routine_id, routine_name, started_at, ended_at, note,
-		   body_weight, content_hash, updated_at)
+		   body_weight, content_hash, made_by, updated_at)
 		values ($1, $2::date,
 		        (select id from input.routines where id = nullif($3,'')),
-		        nullif($4,''), $5, $6, nullif($7,''), $8, $9, now())
+		        nullif($4,''), $5, $6, nullif($7,''), $8, $9, $10, now())
 		on conflict (id) do update set
 		  on_date      = excluded.on_date,
 		  routine_id   = excluded.routine_id,
@@ -342,7 +352,7 @@ func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash stri
 		  content_hash = excluded.content_hash,
 		  updated_at   = now()`,
 		s.ID, s.Date, s.RoutineID, s.RoutineName,
-		time.UnixMilli(s.StartedAt), ended, s.Note, s.BodyWeight, hash); err != nil {
+		time.UnixMilli(s.StartedAt), ended, s.Note, s.BodyWeight, hash, by); err != nil {
 		return fmt.Errorf("세션 저장(%s): %w", s.ID, err)
 	}
 

@@ -14,8 +14,8 @@
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
-//	GET  /workout                      the training log, whole
-//	POST /workout/changes              what changed in it: its record, and the sessions
+//	GET  /workout                      the training log, whole: each session says who made it (by)
+//	POST /workout/changes              what changed in it: its record, and the sessions (a new one is the token's)
 //	GET  /held                         messages set aside after failing on their own
 //	POST /held/{consumer}/{id}/retry   send a held message again now
 //	DELETE /held/{consumer}/{id}       give up on a held message
