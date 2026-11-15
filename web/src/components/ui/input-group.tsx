@@ -95,7 +95,8 @@ const inputGroupButtonVariants = cva(
         sm: "",
         "icon-xs":
           "size-6 rounded-[calc(var(--radius)-3px)] p-0 has-[>svg]:p-0",
-        "icon-sm": "size-8 p-0 has-[>svg]:p-0",
+        // A thumb's, as tall as the field; a pointer's under a mouse.
+        "icon-sm": "size-11 p-0 has-[>svg]:p-0 mouse:size-8",
       },
     },
     defaultVariants: {
@@ -117,6 +118,10 @@ function InputGroupButton({
       type={type}
       data-size={size}
       variant={variant}
+      // Its own sizes, laid over the button's plain one: laid over the
+      // thumb-sized default, that one's mouse: height and type would show
+      // through them.
+      size="default"
       className={cn(inputGroupButtonVariants({ size }), className)}
       {...props}
     />

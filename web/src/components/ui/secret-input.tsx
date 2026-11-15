@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
-import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,15 +35,17 @@ export function SecretInput({
         className={cn("pe-14 mouse:text-ui", className)}
         {...rest}
       />
-      <Toggle
-        pressed={shown}
-        onPressedChange={setShown}
+      {/* A button that says what it will do, not a toggle: pressed as well,
+          it was read "비밀번호 가리기, 선택됨" - as if hiding were on while
+          the password showed. */}
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
         aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
-        size="sm"
-        className="absolute inset-y-0 right-1 my-auto h-9 rounded-md font-normal text-aside text-faint hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent mouse:h-7"
+        className="absolute inset-y-0 right-1 my-auto inline-flex h-9 min-w-7 items-center justify-center rounded-md px-2.5 text-aside font-normal whitespace-nowrap text-faint transition-colors hover:text-foreground focus-ring disabled:pointer-events-none disabled:opacity-40 mouse:h-7"
       >
         {shown ? "가리기" : "보기"}
-      </Toggle>
+      </button>
     </div>
   );
 }

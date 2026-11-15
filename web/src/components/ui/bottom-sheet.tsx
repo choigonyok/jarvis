@@ -18,9 +18,16 @@ import {
  * the middle with its top corners rounded rather than a strip as wide as the
  * screen. How tall it may get and how wide it sits are the two things that
  * differ between the sheets.
+ *
+ * While a phone's keyboard is up the sheet's foot is the keyboard's height
+ * (--kb, ui/sheet.tsx) in place of the home indicator's, which the keyboard
+ * covers too: what was under the keyboard - a form's 저장 - comes up above it
+ * in the sheet's own scroll. A sheet at its full height keeps its top, the
+ * handle and ✕, where it was; a shorter one grows toward that height, no
+ * further.
  */
 const bottomSheetVariants = cva(
-  "inset-x-safe pb-safe gap-0 border-edge-soft bg-background",
+  "inset-x-safe pb-[max(env(safe-area-inset-bottom),var(--kb,0px))] gap-0 border-edge-soft bg-background",
   {
     variants: {
       width: {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BackCloses } from "@/components/ui/sheet";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 export type LightboxItem = {
@@ -11,6 +12,11 @@ export type LightboxItem = {
   src: string;
   /** A video's still, shown until it plays. */
   poster?: string;
+  /**
+   * A smaller picture of the same photo that has already come - the tile
+   * that was tapped: it stands in at the photo's size until the photo comes.
+   */
+  thumb?: string;
   alt?: string;
   /** The line over it: when it was taken, what it is. */
   title?: string;
@@ -198,6 +204,7 @@ export function Lightbox({
                   ) : (
                     <Zoomable
                       src={it.src}
+                      thumb={it.thumb}
                       alt={it.alt ?? ""}
                       active={slot === 1}
                       onPan={pan}
@@ -235,6 +242,7 @@ const DOUBLE_TAP_MS = 300;
  */
 function Zoomable({
   src,
+  thumb,
   alt,
   active,
   onPan,
@@ -242,6 +250,7 @@ function Zoomable({
   onClose,
 }: {
   src: string;
+  thumb?: string;
   alt: string;
   active: boolean;
   onPan: (dx: number) => void;
@@ -268,6 +277,13 @@ function Zoomable({
     v: number;
   } | null>(null);
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  // Whether the photo has come. A black screen said nothing while a large
+  // one was on its way on a phone's network, and nothing when it never came.
+  const [state, setState] = useState<"coming" | "shown" | "failed">("coming");
+  // A new element for each try: a picture that failed is not asked for again
+  // by setting the same address on it.
+  const [attempt, setAttempt] = useState(0);
+  const failed = state === "failed";
 
   // Gone from the middle (slid away), it comes back at its own size.
   useEffect(() => {
@@ -324,10 +340,13 @@ function Zoomable({
       ref={box}
       className={cn("relative h-full w-full touch-none overflow-hidden select-none", !active && "pointer-events-none")}
       onPointerDown={(e) => {
+        // 다시 시도 takes its own press: held here, the click went to the photo.
+        if (e.target instanceof Element && e.target.closest("button")) return;
         const p = local(e);
         pointers.current.set(e.pointerId, p);
         e.currentTarget.setPointerCapture(e.pointerId);
-        if (pointers.current.size === 2) {
+        // A photo that did not come has nothing to zoom into.
+        if (pointers.current.size === 2 && !failed) {
           const [a, b] = [...pointers.current.values()];
           pinch.current = {
             d0: Math.hypot(b.x - a.x, b.y - a.y) || 1,
@@ -425,7 +444,7 @@ function Zoomable({
         // A tap. Two in a row, close together: zoom in, or back out.
         const now = e.timeStamp;
         const last = lastTap.current;
-        if (last && now - last.t < DOUBLE_TAP_MS && Math.hypot(p.x - last.x, p.y - last.y) < 30) {
+        if (!failed && last && now - last.t < DOUBLE_TAP_MS && Math.hypot(p.x - last.x, p.y - last.y) < 30) {
           lastTap.current = null;
           if (st.current.s > 1) st.current = { s: 1, tx: 0, ty: 0 };
           else zoomAt(p.x, p.y, TAP_SCALE);
@@ -443,10 +462,50 @@ function Zoomable({
         paint(true);
       }}
     >
-      <div ref={el} className="flex h-full w-full origin-top-left items-center justify-center will-change-transform">
+      {/* On its way: the tile it was opened from where there is one (below),
+          else a line, under the photo so that the photo covers it as it
+          comes in. */}
+      {state === "coming" && !thumb ? (
+        <p className="absolute inset-0 flex items-center justify-center text-aside text-white/45">{SAY.loading}</p>
+      ) : null}
+      <div ref={el} className="relative flex h-full w-full origin-top-left items-center justify-center will-change-transform">
+        {state === "coming" && thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element -- served through the console's own proxy
+          <img src={thumb} alt="" aria-hidden draggable={false} className="absolute inset-0 size-full object-contain select-none" />
+        ) : null}
         {/* eslint-disable-next-line @next/next/no-img-element -- served through the console's own proxy */}
-        <img src={src} alt={alt} draggable={false} className="max-h-full max-w-full object-contain select-none" />
+        <img
+          key={attempt}
+          src={src}
+          alt={alt}
+          draggable={false}
+          onLoad={() => setState("shown")}
+          onError={() => setState("failed")}
+          className={cn("relative max-h-full max-w-full object-contain select-none", failed && "invisible")}
+        />
       </div>
+      {failed ? (
+        // A failure's red edge (shell/failed.tsx), in the viewer's white on
+        // black. A finger still slides on past it, or pulls down to close.
+        <div className="absolute inset-0 flex items-center justify-center px-8">
+          <div>
+            <p role={active ? "status" : undefined} className="border-l-2 border-reject pl-3 text-ui leading-relaxed text-white/75">
+              사진을 불러오지 못했어요.
+            </p>
+            <button
+              type="button"
+              tabIndex={active ? undefined : -1}
+              onClick={() => {
+                setState("coming");
+                setAttempt((a) => a + 1);
+              }}
+              className="mt-3 inline-flex h-11 items-center justify-center rounded-lg bg-white/15 px-4 text-ui text-white transition-colors outline-none hover:bg-white/25 focus-visible:ring-3 focus-visible:ring-white/50 mouse:h-9"
+            >
+              {SAY.retry}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

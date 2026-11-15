@@ -300,28 +300,33 @@
   }
 }
 
+/* The home indicator and the notch. Applied to whatever sits against an edge -
+   the bottom bar, the composer, the fullscreen viewer. Utilities, as tap below
+   is, rather than plain classes in @layer utilities: a plain class there lands
+   after every generated utility and outranks them all, so a variant written to
+   take one back (sm:landscape:pl-0, sm:p-6, mouse:min-h-0) did nothing. */
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+@utility inset-x-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+/* 44px is the smallest thing a thumb hits reliably. Used to grow a control's
+   hit area without growing the mark inside it; the mouse: sizes beside it
+   (mouse:min-h-0, mouse:min-w-0) are where it gives way to a pointer. */
+@utility tap {
+  min-height: 44px;
+  min-width: 44px;
+}
+
 @layer utilities {
-  /* The home indicator and the notch. Applied to whatever sits against an
-     edge - the bottom bar, the composer, the fullscreen viewer. */
-  .pb-safe {
-    padding-bottom: max(env(safe-area-inset-bottom), 0px);
-  }
   /* The status bar on a home-screen web app: the page runs under it, so the
      top bar takes its height as padding and its background fills behind it. */
   .pt-safe {
     padding-top: env(safe-area-inset-top);
   }
-  .inset-x-safe {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
-  }
-  /* 44px is the smallest thing a thumb hits reliably. Used to grow a control's
-     hit area without growing the mark inside it. */
-  .tap {
-    min-height: 44px;
-    min-width: 44px;
-  }
-  /* The same for a mark that is its own box - a bordered pill, a segment:
+  /* As tap, for a mark that is its own box - a bordered pill, a segment:
      growing the box would grow the pill, so an invisible band above and below
      takes the press instead, up to 44px. */
   .tap-y {

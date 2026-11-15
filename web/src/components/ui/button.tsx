@@ -84,7 +84,9 @@ const buttonVariants = cva(
 function Button({
   className,
   variant = "default",
-  size = "default",
+  // The variants' own default, said again here: "default" here had overruled
+  // it, and a button that named no size was 32px on a phone.
+  size = "touch",
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &

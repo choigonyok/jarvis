@@ -39,7 +39,10 @@ const toggleVariants = cva(
         lg: "h-9 min-w-9 px-2.5",
         // A thumb's on a touch screen, a pointer's under a mouse.
         touch: "min-h-11 px-3 text-ui mouse:min-h-9 mouse:text-aside",
-        chip: "h-9 px-3 text-aside mouse:h-7",
+        // The bordered chip stays 36px; a thumb gets 44 through the unseen
+        // band above and below it (tap-y), which was left for each screen to
+        // remember and mostly was not.
+        chip: "tap-y h-9 px-3 text-aside mouse:h-7",
         segment: "tap-y min-h-8 px-3 text-aside",
       },
     },

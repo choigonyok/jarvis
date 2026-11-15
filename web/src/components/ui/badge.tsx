@@ -20,8 +20,9 @@ const badgeVariants = cva(
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
         // Jarvis: a condition laid on a list (a day, a category, words),
-        // there to be cleared.
-        chip: "h-auto min-h-8 rounded-full bg-glass-raised ps-3 pe-2 text-[length:inherit] font-normal text-ink [&>svg]:size-3! [&>svg]:text-faint",
+        // there to be cleared - by a thumb, through the band above and below
+        // it (tap-y), which a clipped edge would cut off.
+        chip: "tap-y h-auto min-h-8 overflow-visible rounded-full bg-glass-raised ps-3 pe-2 text-[length:inherit] font-normal text-ink [&>svg]:size-3! [&>svg]:text-faint",
       },
     },
     defaultVariants: {

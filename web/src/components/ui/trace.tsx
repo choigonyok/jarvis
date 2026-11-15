@@ -114,7 +114,11 @@ function TraceCollapsibleTrigger({
     <CollapsibleTrigger
       data-slot="trace-collapsible-trigger"
       className={cn(
-        "group/trace-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-faint transition-colors hover:text-dim focus-ring has-[[data-status=error]]:text-reject",
+        // A line of small words that a thumb presses: 44px tall on a touch
+        // screen (it was the words' 19). The margin under it gives back the
+        // room below the words, so what opens under it stays close - drawn
+        // over that room, it keeps its own taps there.
+        "group/trace-collapsible-trigger -mb-3 flex min-h-11 w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-faint transition-colors hover:text-dim focus-ring has-[[data-status=error]]:text-reject mouse:mb-0 mouse:min-h-0",
         className
       )}
       {...props}

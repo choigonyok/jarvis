@@ -55,6 +55,10 @@ function SheetOverlay({
   )
 }
 
+/** What each sheet on screen (and closing) holds in the history, so one can hand its entry to the next. */
+type Entry = { depth: number; path: string; closing: () => boolean }
+const entries = new Set<Entry>()
+
 /**
  * A sheet is a place of its own in the browser's history: opening one adds an
  * entry, and going back - an edge swipe, Android's back - closes it, one sheet
@@ -62,41 +66,74 @@ function SheetOverlay({
  * of the app. Closed any other way, the entry it added goes
  * too; closed by going to another screen from inside it, the entry is left to
  * that screen's history. A sheet holding words not yet saved (held) does not
- * go back: its entry is put back and it asks first.
+ * go back: its entry is put back and it asks first. A sheet opened as another
+ * one closes takes over that one's entry.
  */
-function useSheetHistory(close: () => void, held: React.RefObject<boolean>, ask: () => void) {
+function useSheetHistory(
+  close: () => void,
+  held: React.RefObject<boolean>,
+  ask: () => void,
+  closing: () => boolean,
+  box?: React.RefObject<HTMLElement | null>
+) {
   React.useEffect(() => {
-    let depth = 0
-    let path = ""
-    let popped = false
+    // depth 0: no entry of its own (not yet, gone back, or handed on).
+    const me: Entry = { depth: 0, path: "", closing }
     const onPop = () => {
-      if (!depth || popped) return
-      if ((Number(window.history.state?.jarvisSheet) || 0) < depth) {
+      if (!me.depth) return
+      if ((Number(window.history.state?.jarvisSheet) || 0) < me.depth) {
         if (held.current) {
-          window.history.pushState({ ...window.history.state, jarvisSheet: depth }, "")
+          window.history.pushState({ ...window.history.state, jarvisSheet: me.depth }, "")
           ask()
           return
         }
-        popped = true
+        me.depth = 0
         close()
+      }
+    }
+    const take = () => {
+      const top = Number(window.history.state?.jarvisSheet) || 0
+      me.path = window.location.pathname
+      // One sheet giving way to the next (the routine editor to its exercise
+      // picker and back): the one going is still here while it slides away,
+      // so the entry it leaves is not the top one when it goes, and stayed -
+      // a back that did nothing for every hand-over. This one takes it over.
+      const going = [...entries].find((e) => top > 0 && e.depth === top && e.path === me.path && e.closing())
+      if (going) {
+        going.depth = 0
+        me.depth = top
+      } else {
+        me.depth = top + 1
+        window.history.pushState({ ...window.history.state, jarvisSheet: me.depth }, "")
       }
     }
     // A moment later, not at once: a strict-mode remount must not leave an
     // entry behind it.
     const push = window.setTimeout(() => {
-      depth = (Number(window.history.state?.jarvisSheet) || 0) + 1
-      path = window.location.pathname
-      window.history.pushState({ ...window.history.state, jarvisSheet: depth }, "")
+      take()
+      entries.add(me)
       window.addEventListener("popstate", onPop)
     }, 0)
+    // Opened again while still sliding away, after its entry was handed on or
+    // gone back over: it takes one again.
+    const el = box?.current
+    let reopened: MutationObserver | undefined
+    if (el) {
+      reopened = new MutationObserver(() => {
+        if (!me.depth && entries.has(me) && !closing()) take()
+      })
+      reopened.observe(el, { attributeFilter: ["data-state"] })
+    }
     return () => {
       window.clearTimeout(push)
+      reopened?.disconnect()
       window.removeEventListener("popstate", onPop)
-      if (depth && !popped && window.location.pathname === path && Number(window.history.state?.jarvisSheet) === depth) {
+      entries.delete(me)
+      if (me.depth && window.location.pathname === me.path && Number(window.history.state?.jarvisSheet) === me.depth) {
         window.history.back()
       }
     }
-  }, [close, held, ask])
+  }, [close, held, ask, closing, box])
 }
 
 /**
@@ -105,13 +142,28 @@ function useSheetHistory(close: () => void, held: React.RefObject<boolean>, ask:
  * is drawn for a closed sheet too, and three closed sheets of a screen had
  * pushed three entries as it opened.
  */
-function SheetHistory({ close, held, ask }: { close: () => void; held: React.RefObject<boolean>; ask: () => void }) {
-  useSheetHistory(close, held, ask)
+function SheetHistory({
+  close,
+  held,
+  ask,
+  closing,
+  box,
+}: {
+  close: () => void
+  held: React.RefObject<boolean>
+  ask: () => void
+  closing: () => boolean
+  box: React.RefObject<HTMLElement | null>
+}) {
+  useSheetHistory(close, held, ask, closing, box)
   return null
 }
 
 const never: React.RefObject<boolean> = { current: false }
 const nothing = () => {}
+// What BackCloses stands for is taken away as it closes (the photo viewer):
+// never left sliding away, with an entry for the next to take.
+const no = () => false
 
 /**
  * Going back closes this, as it closes a sheet: for what covers the screen
@@ -126,7 +178,42 @@ function BackCloses({ close }: { close: () => void }) {
     latest.current = close
   })
   const stable = React.useCallback(() => latest.current(), [])
-  useSheetHistory(stable, never, nothing)
+  useSheetHistory(stable, never, nothing, no)
+  return null
+}
+
+/**
+ * How much of a bottom sheet the phone's keyboard covers, kept on the sheet as
+ * --kb for its padding (ui/bottom-sheet.tsx). iOS shrinks only the part of the
+ * page that is seen when the keyboard comes up, not the page, so a sheet
+ * standing on the page's foot kept its own foot - the 저장 under a memo - under
+ * the keyboard, out of reach of its scroll. Nothing without a finger (no soft
+ * keyboard) or with the page zoomed in (the part seen is small because it is
+ * magnified, not covered).
+ */
+function KeyboardInset({ box }: { box: React.RefObject<HTMLElement | null> }) {
+  React.useEffect(() => {
+    const vv = window.visualViewport
+    const el = box.current
+    if (!vv || !el || !window.matchMedia("(pointer: coarse)").matches) return
+    let kb = 0
+    const measure = () => {
+      // The page's foot below the part that is seen.
+      const covered =
+        vv.scale > 1.01 ? 0 : Math.max(0, Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop))
+      if (covered === kb) return
+      kb = covered
+      el.style.setProperty("--kb", `${kb}px`)
+    }
+    measure()
+    vv.addEventListener("resize", measure)
+    vv.addEventListener("scroll", measure)
+    return () => {
+      vv.removeEventListener("resize", measure)
+      vv.removeEventListener("scroll", measure)
+      el.style.removeProperty("--kb")
+    }
+  }, [box])
   return null
 }
 
@@ -168,6 +255,8 @@ function SheetContent({
   const content = React.useRef<HTMLDivElement>(null)
   const closer = React.useRef<HTMLButtonElement>(null)
   const close = React.useCallback(() => closer.current?.click(), [])
+  // Closed and still sliding away: its history entry is the next sheet's to take.
+  const closing = React.useCallback(() => content.current?.getAttribute("data-state") === "closed", [])
   // Read where a way out is taken, which is not where the sheet draws.
   const held = React.useRef(guard)
   React.useLayoutEffect(() => {
@@ -185,6 +274,9 @@ function SheetContent({
     onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
       const el = content.current
       if (side !== "bottom" || e.pointerType === "mouse" || !el) return
+      // Where the box itself scrolls, scrolled down its top is content, which
+      // the finger is scrolling: it pulls the sheet only from the very top.
+      if (el.scrollTop > 0) return
       if (e.clientY - el.getBoundingClientRect().top > 72) return
       if ((e.target as Element).closest("button, a, input, textarea, select, label, [role='button'], [contenteditable='true']")) return
       drag.current = { y: e.clientY, t: e.timeStamp, dy: 0 }
@@ -268,7 +360,8 @@ function SheetContent({
           />
         ) : null}
         {children}
-        <SheetHistory close={close} held={held} ask={ask} />
+        <SheetHistory close={close} held={held} ask={ask} closing={closing} box={content} />
+        {side === "bottom" ? <KeyboardInset box={content} /> : null}
         {/* What closing by hand, by the handle or by going back clicks. */}
         <SheetPrimitive.Close ref={closer} tabIndex={-1} aria-hidden className="hidden" />
         {showCloseButton && (
