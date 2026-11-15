@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { addDays, monthCells, WEEKDAYS, type Cursor } from "@/lib/month";
+import { addDays, monthCells, WEEKDAYS, type Cursor, type WeekStart } from "@/lib/month";
 import { cn } from "@/lib/utils";
 import { OWNER_LABEL, OwnerDot, type Owner } from "@/components/calendar/owner";
-import { photoSrc } from "@/lib/couple";
+import { photoSrc, weekdays as weekdayNames } from "@/lib/couple";
 
 export type DayMark = {
   /** 그날 확정된 일정마다 그 주인. 점의 개수와 색을 정한다. */
@@ -25,10 +25,10 @@ export type DayMark = {
  * worse than a dot.
  */
 /** The days of the week over the grid. It stays put while the pages under it turn. */
-export function WeekdayRow() {
+export function WeekdayRow({ weekStart = "sun" }: { weekStart?: WeekStart }) {
   return (
     <div className="mb-1.5 grid grid-cols-7 gap-px" aria-hidden>
-      {WEEKDAYS.map((label) => (
+      {weekdayNames(weekStart).map((label) => (
         <div key={label} className="py-1 text-center text-meta text-faint">
           {label}
         </div>
@@ -44,6 +44,7 @@ export function MonthGrid({
   marks,
   onSelect,
   onPage,
+  weekStart = "sun",
   weekdays = true,
   passive = false,
 }: {
@@ -54,6 +55,8 @@ export function MonthGrid({
   onSelect: (date: string) => void;
   /** PageUp / PageDown: a month back or on. */
   onPage?: (by: -1 | 1) => void;
+  /** The couple's first day of the week, as their home and habit show it. */
+  weekStart?: WeekStart;
   /** The weekday row above the days (off when a fixed one is drawn outside). */
   weekdays?: boolean;
   /**
@@ -62,7 +65,7 @@ export function MonthGrid({
    */
   passive?: boolean;
 }) {
-  const cells = monthCells(cursor);
+  const cells = monthCells(cursor, weekStart);
   const gridRef = useRef<HTMLDivElement>(null);
   const moveByKey = useRef(false);
 
@@ -98,7 +101,7 @@ export function MonthGrid({
 
   return (
     <div inert={passive} aria-hidden={passive || undefined}>
-      {weekdays ? <WeekdayRow /> : null}
+      {weekdays ? <WeekdayRow weekStart={weekStart} /> : null}
 
       <div
         ref={gridRef}
@@ -141,10 +144,17 @@ export function MonthGrid({
               <span
                 className={cn(
                   "relative tnum grid size-6 place-items-center rounded-full text-ui leading-none",
-                  mark?.photo && "font-semibold text-white",
-                  !cell.inMonth && "text-faint",
-                  cell.inMonth && (isSelected || isToday ? "text-foreground" : "text-dim"),
-                  isToday && "font-semibold ring-1 ring-foreground/45",
+                  // One colour each, as the merge keeps only the last: on a
+                  // photo the date is white on a dark disc in either theme -
+                  // the photo and its scrim are not the page.
+                  mark?.photo
+                    ? "bg-black/35 font-semibold text-white"
+                    : !cell.inMonth
+                      ? "text-faint"
+                      : isSelected || isToday
+                        ? "text-foreground"
+                        : "text-dim",
+                  isToday && (mark?.photo ? "font-semibold ring-1 ring-white/70" : "font-semibold ring-1 ring-foreground/45"),
                 )}
               >
                 {cell.day}

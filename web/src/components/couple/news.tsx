@@ -189,18 +189,45 @@ export function NewsLine({ space, map }: { space: Space | undefined; map: KoreaM
 
 const PAGE = 40;
 
+/** The news while it is read: rows of their shape - the dot, the sentence, when - as quiet blocks. */
+function NewsPlaceholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        {["w-4/5", "w-3/5", "w-2/3"].map((width) => (
+          <div key={width} className="flex gap-3 py-3">
+            <span className="mt-[7px] size-[7px] shrink-0 rounded-full bg-well" />
+            <span className="min-w-0 flex-1">
+              <span className={cn("block h-4 rounded bg-well", width)} />
+              <span className="mt-2 block h-3 w-14 rounded bg-well" />
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Every piece of news, forty at a time; one tapped opens what it is about. */
 function NewsList({ space, map, since, onGo }: { space: Space | undefined; map: KoreaMapData | null; since: string; onGo: () => void }) {
   const router = useRouter();
   const [limit, setLimit] = useState(PAGE);
   const news = useNews(limit);
-  // The list read so far stays while the next forty are on their way.
+  // The next forty on their way: the resource holds the forty before under
+  // their own key until these land (lib/use-resource.ts), so the list stays
+  // and the button says it is reading. Its test had looked for no data.
+  const pending = news.dataKey !== `couple:news:${limit}`;
+  // A list the sheet opened on before its own read landed (the home line's)
+  // stays the same way.
   const [kept, setKept] = useState<News[] | undefined>(undefined);
   if (news.data && news.data !== kept) setKept(news.data);
   const list = news.data ?? kept;
 
   if (news.error && !list) return <Failed onRetry={news.reload}>{SAY.couldNotLoad}</Failed>;
-  if (!list) return <p className="text-ui text-faint">{SAY.loading}</p>;
+  if (!list) return <NewsPlaceholder />;
   if (list.length === 0) return <p className="text-ui text-faint">아직 소식이 없어요.</p>;
   return (
     <div>
@@ -242,9 +269,13 @@ function NewsList({ space, map, since, onGo }: { space: Space | undefined; map: 
           );
         })}
       </ul>
-      {list.length >= limit ? (
-        <Button variant="quiet" size="touch-sm" disabled={!news.data} onClick={() => setLimit((l) => l + PAGE)} className="mt-2 w-full">
-          {news.data ? "더 보기" : SAY.loading}
+      {news.error && pending ? (
+        <Failed quiet onRetry={news.reload} className="mt-3">
+          소식을 더 불러오지 못했어요.
+        </Failed>
+      ) : list.length >= limit || pending ? (
+        <Button variant="quiet" size="touch-sm" disabled={pending} onClick={() => setLimit((l) => l + PAGE)} className="mt-2 w-full">
+          {pending ? SAY.loading : "더 보기"}
         </Button>
       ) : null}
     </div>

@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { Segment } from "@/components/couple/segment";
+import { useUndo } from "@/components/shell/undo";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,11 +17,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { SwitchRow } from "@/components/ui/switch";
-import { dMark, milestones, nextOn, today, together, todayIs, writeCouple, type Block, type DDay, type Space } from "@/lib/couple";
+import { between, dMark, milestones, nextOn, today, together, todayIs, writeCouple, type Block, type DDay, type Space } from "@/lib/couple";
 import { dateLabel } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +57,20 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
     }
     await onChanged();
   }
+  const startTitle = (block.dday ?? []).find((d) => d.start)?.title ?? "";
+  // The day they met before it was changed here: 되돌리기 for five seconds,
+  // and said under the count for the visit. Everything counts from it - the
+  // first line, the days coming, the partner's app, the calendar's
+  // anniversaries - and a year turned on the date wheel went with no trace.
+  const { offer } = useUndo();
+  const [before, setBefore] = useState<string | null>(null);
+  async function putBack(was: { title: string; date: string }) {
+    setNote(null);
+    const sent = await writeCouple("POST", `/blocks/${block.id}/start`, was);
+    if (!sent.ok) return setNote(`만난 날을 되돌리지 못했어요: ${sent.error}`);
+    setBefore(null);
+    await onChanged();
+  }
   const ahead = start ? milestones(start, more ? 12 : 3, now) : [];
   const days = (block.dday ?? [])
     .filter((d) => !d.start)
@@ -76,6 +91,7 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
               </Button>
             )}
           </p>
+          {before && before !== start ? <p className="mt-1 text-aside text-faint">전에는 {dateLabel(before)}부터였어요</p> : null}
         </div>
       ) : (
         <div className="mt-4">
@@ -150,10 +166,15 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
           <StartForm
             block={block}
             start={start}
-            title={(block.dday ?? []).find((d) => d.start)?.title ?? ""}
+            title={startTitle}
             onClose={() => setSetting(false)}
-            onSaved={async () => {
+            onSaved={async (saved) => {
               setSetting(false);
+              if (start && saved.date !== start) {
+                const was = { title: startTitle, date: start };
+                setBefore(start);
+                offer("만난 날을 바꿨어요", () => void putBack(was));
+              }
               await onChanged();
             }}
           />
@@ -337,23 +358,30 @@ function StartForm({
   start?: string;
   title: string;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  /** With what was saved. */
+  onSaved: (saved: { title: string; date: string }) => Promise<void>;
 }) {
   const id = useId();
   const [name, setName] = useState(title);
   const [date, setDate] = useState(start ?? today());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ready = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today() && (date !== start || name.trim() !== title);
+  const now = today();
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= now;
+  const ready = valid && (date !== start || name.trim() !== title);
+  // What the count becomes, seen before it goes to both phones: the date
+  // wheel turns a year over at a brush, and it was seen only once saved.
+  const next = valid && date !== start ? milestones(date, 1, now)[0] : null;
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!ready || busy) return;
     setBusy(true);
     setError(null);
-    const sent = await writeCouple("POST", `/blocks/${block.id}/start`, { title: name.trim(), date });
+    const saved = { title: name.trim(), date };
+    const sent = await writeCouple("POST", `/blocks/${block.id}/start`, saved);
     setBusy(false);
     if (!sent.ok) return setError(sent.error);
-    await onSaved();
+    await onSaved(saved);
   }
   return (
     <form onSubmit={(e) => void save(e)} className="space-y-4">
@@ -363,7 +391,24 @@ function StartForm({
       </Field>
       <Field>
         <FieldLabel htmlFor={`${id}-date`}>날짜 · 그날이 D+1</FieldLabel>
-        <Input id={`${id}-date`} surface="glass" type="date" max={today()} required value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input
+          id={`${id}-date`}
+          surface="glass"
+          type="date"
+          max={now}
+          required
+          value={date}
+          aria-describedby={next ? `${id}-count` : undefined}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        {next ? (
+          <FieldDescription id={`${id}-count`} aria-live="polite" className="text-aside text-dim">
+            저장하면 <span className="font-medium text-ink tabular-nums">D+{together(date, now)}</span>
+            {start ? <span className="tabular-nums"> · 지금은 D+{together(start, now)}</span> : null}
+            {" · "}
+            {todayIs(date, now) ? `오늘 ${todayIs(date, now)}` : `${next.label}까지 ${between(now, next.date)}일`}
+          </FieldDescription>
+        ) : null}
       </Field>
       {error ? (
         <p role="alert" className="text-aside text-reject">

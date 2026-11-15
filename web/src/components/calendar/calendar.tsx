@@ -80,8 +80,14 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
+  // The space's blocks: where a day's photo is uploaded for, and the D-day
+  // an anniversary entry belongs to. And the couple's first day of the week:
+  // the month starts where their home's and habit's weeks do.
+  const space = useSpace();
+  const weekStart = space.data?.weekStart ?? "sun";
+
   const { events: fetched, covered, proposed, waiting, pendingCount, connection, error, readError, loaded, reload, save, change, create, remove, decide } =
-    useCalendar(cursor);
+    useCalendar(cursor, weekStart);
 
   // The operator writes entries here: a new one on the form, one of theirs
   // changed on the same form (entry-sheet.tsx). The guest's console keeps the
@@ -93,7 +99,7 @@ export function Calendar() {
   // on their day by name until they are, as a decision says 반영 중 - with
   // the sheet gone, a day showing nothing read as a save that was lost.
   const [onTheWay, setOnTheWay] = useState<{ date: string; title: string }[]>([]);
-  const bounds = useMemo(() => gridBounds(cursor), [cursor]);
+  const bounds = useMemo(() => gridBounds(cursor, weekStart), [cursor, weekStart]);
   const holidays = useHolidays(bounds.from, bounds.to).data;
   const photos = useDayPhotos(bounds.from, bounds.to);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -118,9 +124,6 @@ export function Calendar() {
   const [asking, setAsking] = useState(false);
   const [toDrop, setToDrop] = useState<string[]>([]);
   const router = useRouter();
-  // The space's blocks: where a day's photo is uploaded for, and the D-day
-  // an anniversary entry belongs to.
-  const space = useSpace();
   const calendarBlock = space.data?.blocks.find((b) => b.type === "calendar")?.id;
   const ddayBlock = space.data?.blocks.find((b) => b.type === "dday")?.id;
   const uploads = useUploads(calendarBlock ?? null);
@@ -317,7 +320,7 @@ export function Calendar() {
 
   // Anything waiting outside the six weeks on screen would otherwise be
   // invisible; the operator is told it exists and can jump to it.
-  const visible = useMemo(() => new Set(monthCells(cursor).map((c) => c.date)), [cursor]);
+  const visible = useMemo(() => new Set(monthCells(cursor, weekStart).map((c) => c.date)), [cursor, weekStart]);
   const elsewhere = creates.filter((g) => !visible.has(g.preview.date));
 
   // The month's page: turned by a swipe, a trackpad, the arrows or PageUp/PageDown.
@@ -358,7 +361,12 @@ export function Calendar() {
                 {cursor.year}년 {cursor.month + 1}월
                 <ChevronDown aria-hidden className="size-4 text-faint" />
               </button>
-              <div className="flex items-center gap-1">
+              {/* Side by side under a thumb - each button is 44px already - so
+                  the row holds the month's name on one line on a 375px phone.
+                  오늘 keeps its place on this month, unseen: appearing as the
+                  month turned, it pushed the name onto two lines and the grid
+                  down. */}
+              <div className="flex items-center mouse:gap-1">
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -379,16 +387,17 @@ export function Calendar() {
                     <Plus aria-hidden className="size-5 mouse:size-4" />
                   </Button>
                 ) : null}
-                {sameMonth(today, cursor) ? null : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelected(today)}
-                    className="h-10 px-3 text-ui text-dim hover:text-foreground mouse:h-7 mouse:px-2.5 mouse:text-aside"
-                  >
-                    오늘
-                  </Button>
-                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelected(today)}
+                  className={cn(
+                    "h-11 px-2 text-ui text-dim hover:text-foreground mouse:h-7 mouse:px-2.5 mouse:text-aside",
+                    sameMonth(today, cursor) && "invisible",
+                  )}
+                >
+                  오늘
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -418,6 +427,7 @@ export function Calendar() {
               marks={marks}
               onSelect={setSelected}
               onPage={page}
+              weekStart={weekStart}
             />
 
             {/* The legend is also the filter: the key to the colors is the
@@ -474,7 +484,7 @@ export function Calendar() {
                   variant="ghost"
                   size="xs"
                   onClick={() => setSelected(elsewhere[0].preview.date)}
-                  className="h-8 px-2.5 text-aside text-dim hover:text-foreground mouse:h-6 mouse:px-2"
+                  className="tap-y h-8 px-2.5 text-aside text-dim hover:text-foreground mouse:h-6 mouse:px-2"
                 >
                   보기
                 </Button>
@@ -655,6 +665,7 @@ export function Calendar() {
         event={entry?.event ?? null}
         occurrence={entry?.occurrence}
         day={entry?.day ?? selected}
+        weekStart={weekStart}
         block={calendarBlock}
         photos={entry?.event ? (photos.data ?? []).filter((p) => p.event && p.event === entry.event!.id.split("#")[0]) : []}
         onOpenChange={(open) => {

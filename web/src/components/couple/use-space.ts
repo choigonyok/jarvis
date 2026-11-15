@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
 import { readCouple, type Block, type Check, type DayPhoto, type News, type Space } from "@/lib/couple";
-import { useResource } from "@/lib/use-resource";
+import { keepValue, keptValue } from "@/lib/keep";
+import { useResource, type Resource } from "@/lib/use-resource";
 
 /**
  * How often what is on screen is read again while it is on screen: the
@@ -10,16 +12,36 @@ import { useResource } from "@/lib/use-resource";
  */
 const LIVE = 60_000;
 
+/**
+ * What was last read under a key, shown while it is read again: a screen's
+ * resource goes with the screen, so going from 우리 to a block's page and back
+ * started from an empty screen every time. Kept while the app is open
+ * (lib/keep.ts), with when it was read - a read that fails over it says so.
+ */
+function useLastRead<T>(key: string | null, read: Resource<T>): Resource<T> {
+  const own = key !== null && read.dataKey === key ? read.data : undefined;
+  const at = read.readAt;
+  useEffect(() => {
+    if (key !== null && own !== undefined) keepValue(key, { data: own, at });
+  }, [key, own, at]);
+  if (key === null || read.data !== undefined) return read;
+  const kept = keptValue<{ data: T; at: Date | null }>(key);
+  return kept ? { ...read, data: kept.data, dataKey: key, readAt: kept.at } : read;
+}
+
 /** The couple's home: the two, since when, every block with what the home shows of it; none read when not wanted. */
 export function useSpace(wanted = true) {
-  return useResource<Space>(wanted ? "couple:space" : null, (signal) => readCouple<Space>("", signal), { interval: LIVE });
+  const key = wanted ? "couple:space" : null;
+  return useLastRead(key, useResource<Space>(key, (signal) => readCouple<Space>("", signal), { interval: LIVE }));
 }
 
 /** One block whole - a date map with every photo and record. */
 export function useBlock(id: string) {
-  return useResource<Block>(`couple:block:${id}`, (signal) => readCouple<Block>(`/blocks/${encodeURIComponent(id)}`, signal), {
-    interval: LIVE,
-  });
+  const key = `couple:block:${id}`;
+  return useLastRead(
+    key,
+    useResource<Block>(key, (signal) => readCouple<Block>(`/blocks/${encodeURIComponent(id)}`, signal), { interval: LIVE }),
+  );
 }
 
 /**
@@ -38,11 +60,14 @@ export function useChecks(block: string | null, from: string, to: string) {
   return checks.dataKey === key ? checks : { ...checks, data: undefined };
 }
 
-/** What the two did in the space, newest first. */
+/** What the two did in the space, newest first. The sheet opens on the forty the home's line read last. */
 export function useNews(limit = 40) {
-  return useResource<News[]>(`couple:news:${limit}`, (signal) =>
-    readCouple<{ news: News[] }>(`/news?limit=${limit}`, signal).then((r) => r.news ?? []),
-    { interval: LIVE },
+  const key = `couple:news:${limit}`;
+  return useLastRead(
+    key,
+    useResource<News[]>(key, (signal) => readCouple<{ news: News[] }>(`/news?limit=${limit}`, signal).then((r) => r.news ?? []), {
+      interval: LIVE,
+    }),
   );
 }
 

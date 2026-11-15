@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
@@ -26,9 +26,19 @@ export function ReorderSheet<T extends { id: string }>({
   /** Resolves to why the order did not go, or null. */
   onSave: (ids: string[]) => Promise<string | null>;
 }) {
+  // An order changed and not saved asks before a pull down, Back or the ✕
+  // drops it (ui/sheet.tsx).
+  const [moved, setMoved] = useState(false);
   return (
-    <Panel open={open} onOpenChange={onOpenChange} title={title} description="순서를 바꾸면 상대의 uniple 앱에도 같은 순서로 보여요." height="tall">
-      {open ? <Order items={items} label={label} onSave={onSave} onClose={() => onOpenChange(false)} /> : null}
+    <Panel
+      open={open}
+      onOpenChange={onOpenChange}
+      guard={moved}
+      title={title}
+      description="순서를 바꾸면 상대의 uniple 앱에도 같은 순서로 보여요."
+      height="tall"
+    >
+      {open ? <Order items={items} label={label} onSave={onSave} onClose={() => onOpenChange(false)} onMoved={setMoved} /> : null}
     </Panel>
   );
 }
@@ -38,16 +48,27 @@ function Order<T extends { id: string }>({
   label,
   onSave,
   onClose,
+  onMoved,
 }: {
   items: T[];
   label: (item: T) => string;
   onSave: (ids: string[]) => Promise<string | null>;
   onClose: () => void;
+  onMoved: (moved: boolean) => void;
 }) {
   const [order, setOrder] = useState(items);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const moved = order.some((it, i) => it.id !== items[i]?.id);
+  // Moved, of the items both lists hold: one the partner adds or takes off
+  // meanwhile is not a move.
+  const here = new Set(order.map((it) => it.id));
+  const was = items.filter((it) => here.has(it.id));
+  const known = new Set(was.map((it) => it.id));
+  const moved = order.filter((it) => known.has(it.id)).some((it, i) => it.id !== was[i].id);
+  useEffect(() => {
+    onMoved(moved);
+    return () => onMoved(false);
+  }, [moved, onMoved]);
 
   function move(i: number, by: -1 | 1) {
     setOrder((list) => {
@@ -105,7 +126,7 @@ function Order<T extends { id: string }>({
       ) : null}
       <div className="mt-4 flex gap-2">
         <Button variant="soft" size="touch-sm" onClick={onClose} className="flex-1">
-          닫기
+          {moved ? "바꾼 순서 버리기" : "닫기"}
         </Button>
         <Button variant="raised" size="touch" disabled={!moved || busy} onClick={() => void save()} className="flex-1">
           {busy ? "저장하는 중…" : "순서 저장"}

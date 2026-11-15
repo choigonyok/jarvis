@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { MonthGrid, type DayMark } from "@/components/calendar/month-grid";
-import { shiftMonth, type Cursor } from "@/lib/month";
+import { shiftMonth, type Cursor, type WeekStart } from "@/lib/month";
 
 /** How far a page must be pulled, as a share of its width, to turn. */
 const TURN_AT = 0.22;
@@ -49,6 +49,7 @@ export function MonthSwipe({
   marks,
   onSelect,
   onPage,
+  weekStart,
 }: {
   ref?: Ref<MonthSwipeHandle>;
   cursor: Cursor;
@@ -58,6 +59,7 @@ export function MonthSwipe({
   onSelect: (date: string) => void;
   /** Turn by a month; the selection moves with it. */
   onPage: (by: -1 | 1) => void;
+  weekStart?: WeekStart;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -251,6 +253,7 @@ export function MonthSwipe({
                 marks={marks}
                 onSelect={onSelect}
                 onPage={passive ? undefined : go}
+                weekStart={weekStart}
                 passive={passive}
               />
             </div>

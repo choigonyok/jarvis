@@ -11,8 +11,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { SwitchRow } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { REMINDERS, REPEATS, between, type DayPhoto } from "@/lib/couple";
-import { addDays, cursorOf, monthCells, pad, shiftMonth, type Cursor } from "@/lib/month";
+import { REMINDERS, REPEATS, between, weekdays, type DayPhoto } from "@/lib/couple";
+import { addDays, cursorOf, monthCells, pad, shiftMonth, type Cursor, type WeekStart } from "@/lib/month";
 import type { CalendarEvent } from "@/lib/thread";
 import { dateLabel } from "@/lib/when";
 import { cn } from "@/lib/utils";
@@ -48,6 +48,7 @@ export function EntrySheet({
   open,
   event,
   day,
+  weekStart,
   occurrence,
   block,
   photos = [],
@@ -63,6 +64,8 @@ export function EntrySheet({
   occurrence?: CalendarEvent;
   /** The day a new entry starts on. */
   day: string;
+  /** Where the copy's month starts its weeks, as the calendar under it does. */
+  weekStart?: WeekStart;
   /** The calendar block photos are uploaded for; none, no photos here. */
   block?: string;
   /** The entry's photos as they stand. */
@@ -97,6 +100,7 @@ export function EntrySheet({
           event={event}
           occurrence={occurrence}
           day={day}
+          weekStart={weekStart}
           block={block}
           photos={photos}
           onSave={onSave}
@@ -114,6 +118,7 @@ function Form({
   event,
   occurrence,
   day,
+  weekStart,
   block,
   photos,
   onSave,
@@ -125,6 +130,7 @@ function Form({
   event: CalendarEvent | null;
   occurrence?: CalendarEvent;
   day: string;
+  weekStart?: WeekStart;
   block?: string;
   photos: DayPhoto[];
   onSave: (entry: Entry) => Promise<string | null>;
@@ -230,6 +236,7 @@ function Form({
     return (
       <CopyDays
         from={event.date}
+        weekStart={weekStart}
         onBack={() => setCopying(false)}
         onCopy={async (days) => {
           const copied = await onCopy({ ...entry(), id: undefined, recurrence: undefined, repeat: undefined, photos: undefined }, days);
@@ -424,7 +431,17 @@ function Form({
 }
 
 /** Days to copy an entry to, picked on a month. */
-function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; onCopy: (days: string[]) => Promise<Copied> }) {
+function CopyDays({
+  from,
+  weekStart = "sun",
+  onBack,
+  onCopy,
+}: {
+  from: string;
+  weekStart?: WeekStart;
+  onBack: () => void;
+  onCopy: (days: string[]) => Promise<Copied>;
+}) {
   const [cursor, setCursor] = useState<Cursor>(cursorOf(from));
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   // Days a copy that stopped went into before it did: no longer picked, and
@@ -433,7 +450,7 @@ function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; 
   const [copied, setCopied] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cells = useMemo(() => monthCells(cursor), [cursor]);
+  const cells = useMemo(() => monthCells(cursor, weekStart), [cursor, weekStart]);
 
   function toggle(day: string) {
     setPicked((s) => {
@@ -465,7 +482,7 @@ function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; 
       </div>
       <p className="mt-1 text-aside text-faint">복사할 날을 골라요. {dateLabel(from)}의 일정 그대로 들어가요.</p>
       <div className="mt-3 grid grid-cols-7 gap-1 text-center">
-        {["일", "월", "화", "수", "목", "금", "토"].map((n) => (
+        {weekdays(weekStart).map((n) => (
           <span key={n} className="text-meta text-faint">
             {n}
           </span>

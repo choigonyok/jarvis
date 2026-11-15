@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Input } from "@/components/ui/input";
 import { OwnerDot, ownerOf } from "@/components/calendar/owner";
+import { Failed } from "@/components/shell/failed";
 import { HttpError, useResource } from "@/lib/use-resource";
 import { SAY } from "@/lib/say";
 import { shiftDay, dateLabel, dayOf } from "@/lib/when";
 import type { CalendarEvent } from "@/lib/thread";
+import { cn } from "@/lib/utils";
 
 /**
  * Finding an entry by its words, a year either way of today - as far as the
@@ -43,7 +45,8 @@ export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOp
     for (const e of order) {
       const series = e.id.split("#")[0];
       if (seen.has(series)) continue;
-      if (`${e.title}\n${e.memo ?? ""}`.toLowerCase().includes(q)) {
+      // The place too: an entry from before it moved to the memo's first line keeps it apart.
+      if (`${e.title}\n${e.place ?? ""}\n${e.memo ?? ""}`.toLowerCase().includes(q)) {
         seen.add(series);
         hits.push(e);
       }
@@ -57,11 +60,13 @@ export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOp
       <Input autoFocus surface="glass" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="제목이나 메모로 찾기" aria-label="일정 찾기" />
       <div className="mt-3 min-h-40">
         {year.error && !year.data ? (
-          <p className="text-ui text-reject">{SAY.couldNotLoad}</p>
-        ) : !year.data ? (
-          <p className="text-ui text-faint">{SAY.loading}</p>
+          <Failed quiet onRetry={year.reload}>
+            {SAY.couldNotLoad}
+          </Failed>
         ) : !query.trim() ? (
           <p className="text-ui text-faint">앞뒤 1년의 일정에서 찾아요.</p>
+        ) : !year.data ? (
+          <FoundPlaceholder />
         ) : found.length === 0 ? (
           <p className="text-ui text-faint">찾는 일정이 없어요.</p>
         ) : (
@@ -92,5 +97,30 @@ export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOp
         )}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * What is typed waiting on the year being read: rows of a result's shape -
+ * the dot, the title, its day - as quiet blocks the results arrive into.
+ */
+function FoundPlaceholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        {["w-3/5", "w-2/5", "w-1/2"].map((width) => (
+          <div key={width} className="flex items-start gap-3 py-3">
+            <span className="mt-[7px] size-[7px] shrink-0 rounded-full bg-well" />
+            <span className="min-w-0 flex-1">
+              <span className={cn("block h-4 rounded bg-well", width)} />
+              <span className="mt-2 block h-3 w-24 rounded bg-well" />
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
-import { gridBounds, shiftMonth, type Cursor } from "@/lib/month";
+import { gridBounds, shiftMonth, type Cursor, type WeekStart } from "@/lib/month";
 import { DECIDE_ECHO_MS, decideProposal } from "@/lib/decide";
 import { MODULE, ofModule } from "@/lib/kinds";
 import {
@@ -24,7 +24,7 @@ function byStart(a: CalendarEvent, b: CalendarEvent): number {
   return a.id.localeCompare(b.id);
 }
 
-export function useCalendar(cursor: Cursor) {
+export function useCalendar(cursor: Cursor, weekStart: WeekStart = "sun") {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   // What a change made here could not do (a removal, the guest's edit).
@@ -43,8 +43,8 @@ export function useCalendar(cursor: Cursor) {
   // And the months either side whole: a swipe pulls the next page into view
   // before it is let go, and that page should already carry its dots.
   const { from, to } = useMemo(
-    () => ({ from: gridBounds(shiftMonth(cursor, -1)).from, to: gridBounds(shiftMonth(cursor, 1)).to }),
-    [cursor],
+    () => ({ from: gridBounds(shiftMonth(cursor, -1), weekStart).from, to: gridBounds(shiftMonth(cursor, 1), weekStart).to }),
+    [cursor, weekStart],
   );
 
   // Reads land in any order. What lands is shown if it was asked for after

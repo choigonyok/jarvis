@@ -13,6 +13,7 @@ import { WorldMap, useWorldMap, worldFaces } from "@/components/couple/world-map
 import { CoupleScreen, useViewOnly } from "@/components/couple/screen";
 import { useChecks, useCover, useSpace } from "@/components/couple/use-space";
 import { UncheckQuestion, WeekStrip, useCheckToday } from "@/components/couple/habit";
+import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -67,9 +68,10 @@ export function CoupleHome() {
           </Failed>
         </div>
       ) : !space.data ? (
-        <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
+        <HomePlaceholder />
       ) : (
         <>
+          {space.error ? <AsOf at={space.readAt} failed onRetry={() => void space.reload()} className="mb-3" /> : null}
           <Together space={space.data} dday={dday} />
           <div className="mt-3 max-w-[34rem]">
             <NewsLine space={space.data} map={map} />
@@ -103,6 +105,30 @@ export function CoupleHome() {
   );
 }
 
+/**
+ * The home before it was ever read in this visit to the app: the day count,
+ * its line and the blocks' glass, as quiet blocks the home arrives into.
+ */
+function HomePlaceholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="mt-1 h-(--display-lg) w-32 rounded-lg bg-well" />
+        <div className="mt-3 h-4 w-52 rounded bg-well" />
+        <div className="mt-3 h-11" />
+        <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-44 rounded-2xl bg-glass" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** The first line: the day count, and the next day worth counting - or, as the D-day block asks, the next three. */
 function Together({ space, dday }: { space: Space; dday?: Block }) {
   const start = space.anniversary;
@@ -117,10 +143,14 @@ function Together({ space, dday }: { space: Space; dday?: Block }) {
           .sort((a, b) => a.date.localeCompare(b.date))
           .slice(0, 3)
       : [];
+  // The line is a door, as a card's name is: the D-day's page is where the
+  // day they met is changed.
+  const door = dday ? <ChevronRight aria-hidden className="size-5 shrink-0 text-faint" /> : null;
   const body = start ? (
     <>
-      <p className="text-display-lg leading-none font-semibold tracking-tight text-foreground tabular-nums">
-        D+{together(start, now)}
+      <p className="flex items-center gap-1.5 text-display-lg leading-none font-semibold tracking-tight text-foreground tabular-nums">
+        <span>D+{together(start, now)}</span>
+        {door}
       </p>
       {coming.length ? (
         <ul className="mt-3 max-w-[22rem] space-y-1">
@@ -146,14 +176,20 @@ function Together({ space, dday }: { space: Space; dday?: Block }) {
     </>
   ) : (
     <>
-      <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">만난 날이 아직 없어요</p>
+      <p className="flex items-center gap-1.5 text-display leading-[1.25] font-semibold tracking-tight text-foreground">
+        <span>만난 날이 아직 없어요</span>
+        {door}
+      </p>
       <p className="mt-2 text-ui text-dim">uniple 앱의 디데이에서 정하면 여기서 날을 세요.</p>
     </>
   );
   if (!dday) return <div>{body}</div>;
+  // Named by what it says - the count, the days coming - and then where it
+  // goes: a label of its own had kept the count from a screen reader.
   return (
-    <Link href={`/couple/${dday.id}`} className="-mx-2 block rounded-xl px-2 py-1 transition-colors hover:bg-glass focus-ring" aria-label={`${dday.title} 디데이 열기`}>
+    <Link href={`/couple/${dday.id}`} className="-mx-2 block rounded-xl px-2 py-1 transition-colors hover:bg-glass focus-ring">
       {body}
+      <span className="sr-only">디데이 열기</span>
     </Link>
   );
 }
@@ -408,7 +444,9 @@ function CalendarCard({ block, space }: { block: Block; space: Space }) {
                   <span
                     className={cn(
                       "flex size-6 items-center justify-center rounded-full text-meta tabular-nums",
-                      isToday ? "bg-foreground font-semibold text-background" : "text-ink",
+                      // Today as the calendar draws it: a filled disc is what
+                      // the month picker and the copy's month mean by picked.
+                      isToday ? "font-semibold text-foreground ring-1 ring-foreground/45" : "text-ink",
                     )}
                   >
                     {Number(c.date.slice(8))}
@@ -427,6 +465,12 @@ function CalendarCard({ block, space }: { block: Block; space: Space }) {
           </div>
         </div>
       </div>
+      {(month.error && !month.data) || (cover.error && cover.data === undefined) ? (
+        // A month with no dots, or no photo, is also what nothing read looks like.
+        <Failed quiet onRetry={() => Promise.all([month.reload(), cover.reload()])} className="mt-3">
+          {month.error && !month.data ? "이번 달 일정을 불러오지 못했어요." : "사진을 불러오지 못했어요."}
+        </Failed>
+      ) : null}
     </Card>
   );
 }
@@ -445,11 +489,18 @@ function HabitCard({ block, space }: { block: Block; space: Space }) {
   return (
     <Card block={block}>
       <p className="mb-3 flex items-center gap-3 text-aside" aria-label="이번 주">
-        <Count dot="bg-mine" label="나" n={days.me.size} />
-        <Count dot="bg-partner" label="상대" n={days.partner.size} />
-        <Count dot="owner-shared" label="함께" n={days.both.size} />
+        <Count dot="bg-mine" label="나" n={checks.data ? days.me.size : undefined} />
+        <Count dot="bg-partner" label="상대" n={checks.data ? days.partner.size : undefined} />
+        <Count dot="owner-shared" label="함께" n={checks.data ? days.both.size : undefined} />
       </p>
-      <WeekStrip days={week} checks={checks.data ?? []} today={now} weekStart={space.weekStart} />
+      {checks.error && !checks.data ? (
+        // Not a week nobody checked, and why 오늘 체크하기 is off.
+        <Failed quiet onRetry={checks.reload}>
+          이번 주 체크를 불러오지 못했어요.
+        </Failed>
+      ) : (
+        <WeekStrip days={week} checks={checks.data ?? []} today={now} weekStart={space.weekStart} />
+      )}
       {viewOnly ? null : (
         <Button
           variant={mine ? "soft" : "raised"}
@@ -478,12 +529,17 @@ function HabitCard({ block, space }: { block: Block; space: Space }) {
   );
 }
 
-function Count({ dot, label, n }: { dot: string; label: string; n: number }) {
+function Count({ dot, label, n }: { dot: string; label: string; n?: number }) {
   return (
     <span className="inline-flex items-center gap-1 text-dim">
       <span aria-hidden className={cn("size-[6px] rounded-full", dot)} />
       {label}
-      <span className="text-ink tabular-nums">{n}</span>
+      {n === undefined ? (
+        // The week not read yet: the figure's place, not a 0.
+        <span aria-hidden className="h-2.5 w-2 rounded-sm bg-well" />
+      ) : (
+        <span className="text-ink tabular-nums">{n}</span>
+      )}
     </span>
   );
 }
@@ -492,23 +548,25 @@ function Count({ dot, label, n }: { dot: string; label: string; n: number }) {
 
 function BucketCard({ block, onChanged }: { block: Block; onChanged: () => unknown }) {
   const items = block.bucket ?? [];
-  const done = items.filter((b) => b.done).length;
+  // Wishes marked here, as last set. One ticked stays in its row for the
+  // visit with the green check, and a second tap takes it back: it had left
+  // the card at once, the next wish moving up under the thumb, and the way
+  // back was the page's folded 이룬 것.
+  const [marked, setMarked] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const isDone = (b: Bucket) => marked.get(b.id) ?? b.done;
+  const done = items.filter(isDone).length;
   const share = items.length ? Math.round((done / items.length) * 100) : 0;
-  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const open = items.filter((b) => !b.done && !ticked.has(b.id)).slice(0, 3);
+  const open = items.filter((b) => !b.done || marked.has(b.id)).slice(0, 3);
   const viewOnly = useViewOnly();
 
-  async function tick(b: Bucket) {
+  async function mark(b: Bucket) {
+    const next = !isDone(b);
     setError(null);
-    setTicked((s) => new Set(s).add(b.id));
-    const sent = await writeCouple("PATCH", `/blocks/${block.id}/bucket/${b.id}`, { done: true });
+    setMarked((m) => new Map(m).set(b.id, next));
+    const sent = await writeCouple("PATCH", `/blocks/${block.id}/bucket/${b.id}`, { done: next });
     if (!sent.ok) {
-      setTicked((s) => {
-        const next = new Set(s);
-        next.delete(b.id);
-        return next;
-      });
+      setMarked((m) => new Map(m).set(b.id, !next));
       setError(sent.error);
       return;
     }
@@ -520,23 +578,35 @@ function BucketCard({ block, onChanged }: { block: Block; onChanged: () => unkno
       {items.length ? <Progress value={share} className="h-1.5" indicatorClassName="bg-foreground/70" aria-label={`${share}% 이뤘어요`} /> : null}
       {open.length ? (
         <ul className="mt-3 space-y-0.5">
-          {open.map((b) => (
-            <li key={b.id} className="flex min-h-10 items-center gap-3">
-              {viewOnly ? (
-                <span aria-hidden className="size-5 shrink-0 rounded-full border-[1.5px] border-edge" />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void tick(b)}
-                  aria-label={`${b.title} 이뤘어요로 표시`}
-                  className="tap -m-2.5 flex shrink-0 items-center justify-center rounded-full p-2.5 focus-ring"
-                >
-                  <span aria-hidden className="size-5 rounded-full border-[1.5px] border-dim transition-colors hover:border-foreground" />
-                </button>
-              )}
-              <span className="min-w-0 truncate text-ui text-ink">{b.title}</span>
-            </li>
-          ))}
+          {open.map((b) => {
+            const ticked = isDone(b);
+            return (
+              <li key={b.id} className="flex min-h-10 items-center gap-3">
+                {viewOnly ? (
+                  <span aria-hidden className="size-5 shrink-0 rounded-full border-[1.5px] border-edge" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void mark(b)}
+                    aria-label={ticked ? `${b.title} 이룬 것 취소` : `${b.title} 이뤘어요로 표시`}
+                    aria-pressed={ticked}
+                    className="tap -m-2.5 flex shrink-0 items-center justify-center rounded-full p-2.5 focus-ring"
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "flex size-5 items-center justify-center rounded-full border-[1.5px] transition-colors",
+                        ticked ? "border-approve-fill bg-approve-wash text-approve" : "border-dim hover:border-foreground",
+                      )}
+                    >
+                      {ticked ? <CheckMark className="size-3" strokeWidth={3} /> : null}
+                    </span>
+                  </button>
+                )}
+                <span className={cn("min-w-0 truncate text-ui", ticked ? "text-dim" : "text-ink")}>{b.title}</span>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="mt-3 text-ui text-faint">{items.length ? "전부 이뤘어요. 다음 버킷을 적어 볼까요?" : "적어 두면 다 이루게 돼요."}</p>

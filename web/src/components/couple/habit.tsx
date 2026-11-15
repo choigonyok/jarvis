@@ -28,6 +28,19 @@ function fillOf(me: boolean, partner: boolean): string {
   return "";
 }
 
+/**
+ * A day's number, ringed thin when it is today - as the calendar marks it -
+ * so the thick ring round a cell means the day picked, here and on the home's
+ * week alike. On a day someone did, the ring is the number's own colour.
+ */
+function DayNumber({ day, today: isToday, filled }: { day: string; today: boolean; filled: boolean }) {
+  return (
+    <span className={cn("grid size-6 place-items-center rounded-full", isToday && (filled ? "font-semibold ring-1 ring-current" : "font-semibold ring-1 ring-foreground/45"))}>
+      {Number(day.slice(8))}
+    </span>
+  );
+}
+
 /** The week on the home, a day a cell. */
 export function WeekStrip({ days, checks, today: now, weekStart }: { days: string[]; checks: Check[]; today: string; weekStart: Space["weekStart"] }) {
   const { me, partner } = checkedDays(checks);
@@ -37,6 +50,7 @@ export function WeekStrip({ days, checks, today: now, weekStart }: { days: strin
       {days.map((d, i) => {
         const future = d > now;
         const who = me.has(d) && partner.has(d) ? "둘 다" : me.has(d) ? "나" : partner.has(d) ? "상대" : "아무도 안 함";
+        const fill = fillOf(me.has(d), partner.has(d));
         return (
           <li key={d} className="flex flex-col items-center gap-1" aria-label={`${dateLabel(d)} · ${future ? "아직" : who}`}>
             <span aria-hidden className="text-tiny text-faint">
@@ -46,11 +60,11 @@ export function WeekStrip({ days, checks, today: now, weekStart }: { days: strin
               aria-hidden
               className={cn(
                 "flex aspect-square w-full max-w-11 items-center justify-center rounded-lg text-ui tabular-nums",
-                fillOf(me.has(d), partner.has(d)) || (future ? "text-faint/60" : "bg-glass-raised text-dim"),
-                d === now && "ring-2 ring-foreground ring-offset-2 ring-offset-background",
+                fill || (future ? "text-faint/60" : "bg-glass-raised text-dim"),
+                d === now && !fill && "text-foreground",
               )}
             >
-              {Number(d.slice(8))}
+              <DayNumber day={d} today={d === now} filled={!!fill} />
             </span>
           </li>
         );
@@ -134,7 +148,7 @@ export function HabitPage({ block, space, onChanged }: { block: Block; space: Sp
         </h2>
         <div className="flex items-center gap-1">
           {month !== now.slice(0, 7) ? (
-            <Button variant="ghost" size="sm" onClick={() => (setMonth(now.slice(0, 7)), setPicked(now))} className="h-10 px-3 text-ui text-dim hover:text-foreground mouse:h-7">
+            <Button variant="ghost" size="sm" onClick={() => (setMonth(now.slice(0, 7)), setPicked(now))} className="h-11 px-3 text-ui text-dim hover:text-foreground mouse:h-7">
               오늘
             </Button>
           ) : null}
@@ -204,10 +218,10 @@ export function HabitPage({ block, space, onChanged }: { block: Block; space: Sp
                 "flex aspect-square items-center justify-center rounded-lg text-ui tabular-nums transition-colors focus-ring",
                 fill || (future ? "text-faint/50" : "bg-glass text-dim hover:bg-glass-raised"),
                 picked === d && "ring-2 ring-foreground ring-offset-2 ring-offset-background",
-                d === now && !fill && "font-semibold text-foreground",
+                d === now && !fill && "text-foreground",
               )}
             >
-              {Number(d.slice(8))}
+              <DayNumber day={d} today={d === now} filled={!!fill} />
             </button>
           );
         })}

@@ -3,6 +3,9 @@ import { dateLabel } from "@/lib/when";
 
 export type Cursor = { year: number; month: number }; // month: 0-11
 
+/** The day a week starts on: Sunday, unless the couple's uniple says Monday. */
+export type WeekStart = "sun" | "mon";
+
 export const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
 
 export function pad(n: number): string {
@@ -56,10 +59,11 @@ export type Cell = {
  * list up and down as you page through the year, and a calendar that moves
  * under the cursor is a calendar you stop trusting.
  */
-export function monthCells(cursor: Cursor): Cell[] {
+export function monthCells(cursor: Cursor, weekStart: WeekStart = "sun"): Cell[] {
   const first = new Date(cursor.year, cursor.month, 1);
   const start = new Date(first);
-  start.setDate(1 - first.getDay()); // 그 주의 일요일부터
+  // 그 주의 일요일부터, 또는 월요일부터
+  start.setDate(1 - ((first.getDay() - (weekStart === "mon" ? 1 : 0) + 7) % 7));
 
   return Array.from({ length: 42 }, (_, i) => {
     const d = new Date(start);
@@ -74,7 +78,7 @@ export function monthCells(cursor: Cursor): Cell[] {
 }
 
 /** Both bounds inclusive, covering every cell the grid will show. */
-export function gridBounds(cursor: Cursor): { from: string; to: string } {
-  const cells = monthCells(cursor);
+export function gridBounds(cursor: Cursor, weekStart: WeekStart = "sun"): { from: string; to: string } {
+  const cells = monthCells(cursor, weekStart);
   return { from: cells[0].date, to: cells[cells.length - 1].date };
 }

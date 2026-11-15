@@ -10,6 +10,7 @@ import { CoupleScreen } from "@/components/couple/screen";
 import { BudgetPage, DiaryPage, FoodPage, LogPage } from "@/components/couple/shelf";
 import { useBlock, useSpace } from "@/components/couple/use-space";
 import { WorldMapPage } from "@/components/couple/world-page";
+import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { BLOCK_NAME } from "@/lib/couple";
 import { SAY } from "@/lib/say";
@@ -21,17 +22,22 @@ export function BlockPage({ id }: { id: string }) {
   const reload = async () => {
     await Promise.all([block.reload(), space.reload()]);
   };
-  const failed = (block.error && !block.data) || (space.error && !space.data);
+  // A block gone is gone, whatever was read of it before.
+  const gone = block.error?.message === "404" || /없습니다/.test(block.error?.message ?? "");
+  const failed = gone || (block.error && !block.data) || (space.error && !space.data);
   const b = block.data;
 
   return (
     <CoupleScreen back>
+      {!failed && b && space.data && (block.error || space.error) ? (
+        <AsOf at={block.error ? block.readAt : space.readAt} failed onRetry={() => void reload()} className="mb-3" />
+      ) : null}
       {failed ? (
         <Failed onRetry={reload} className="mt-2">
-          {block.error?.message === "404" || /없습니다/.test(block.error?.message ?? "") ? "이 블록이 없어요. 지워졌을 수 있어요." : SAY.couldNotLoad}
+          {gone ? "이 블록이 없어요. 지워졌을 수 있어요." : SAY.couldNotLoad}
         </Failed>
       ) : !b || !space.data ? (
-        <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
+        <PagePlaceholder title={space.data?.blocks.find((x) => x.id === id)?.title} />
       ) : b.type === "dday" ? (
         <DDayPage block={b} space={space.data} onChanged={reload} />
       ) : b.type === "bucket" ? (
@@ -61,5 +67,28 @@ export function BlockPage({ id }: { id: string }) {
         </div>
       )}
     </CoupleScreen>
+  );
+}
+
+/**
+ * A page before its block was ever read in this visit to the app: its name,
+ * when 우리 has it, over quiet blocks the page arrives into.
+ */
+function PagePlaceholder({ title }: { title?: string }) {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      {title ? (
+        <h1 className="text-display leading-[1.2] font-semibold tracking-tight break-keep text-foreground">{title}</h1>
+      ) : (
+        <div aria-hidden className="my-1 h-(--display) w-40 rounded-lg bg-well" />
+      )}
+      <div aria-hidden>
+        <div className="mt-5 h-4 w-48 rounded bg-well" />
+        <div className="mt-5 h-48 rounded-2xl bg-glass" />
+      </div>
+    </div>
   );
 }

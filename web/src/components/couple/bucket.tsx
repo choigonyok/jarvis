@@ -55,9 +55,10 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
   const ahead = shown.filter((b) => !b.done);
   const share = shown.length ? Math.round((done.length / shown.length) * 100) : 0;
   const found = useMemo(() => {
-    const q = query?.trim();
+    // Case aside, as 일정 찾기 does: "bts" finds "BTS 콘서트".
+    const q = query?.trim().toLowerCase();
     if (!q) return null;
-    return shown.filter((b) => b.title.includes(q));
+    return shown.filter((b) => b.title.toLowerCase().includes(q));
   }, [shown, query]);
 
   async function add(e: React.FormEvent) {
@@ -253,26 +254,42 @@ function List({
     <ul className={cn("divide-y divide-edge-soft", className)}>
       {items.map((b) => (
         <li key={b.id} data-focus={`bucket:${b.id}`} className="flex min-h-12 items-center gap-3">
-          <button
-            type="button"
-            disabled={viewOnly}
-            onClick={() => onMark(b, !b.done)}
-            aria-label={b.done ? `${b.title} 이룬 것 취소` : `${b.title} 이뤘어요로 표시`}
-            aria-pressed={b.done}
-            className="tap -m-2.5 flex shrink-0 items-center justify-center rounded-full p-2.5 focus-ring"
-          >
+          {viewOnly ? (
+            // The guest's is the mark alone, as on the home's card: drawn as a
+            // button, it was one that did nothing.
             <span
               aria-hidden
               className={cn(
-                "flex size-[22px] items-center justify-center rounded-full border-[1.5px] transition-colors",
-                b.done ? "border-approve-fill bg-approve-wash text-approve" : "border-dim hover:border-foreground",
+                "flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px]",
+                b.done ? "border-approve-fill bg-approve-wash text-approve" : "border-edge",
               )}
             >
               {b.done ? <CheckMark className="size-3.5" strokeWidth={3} /> : null}
             </span>
-          </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onMark(b, !b.done)}
+              aria-label={b.done ? `${b.title} 이룬 것 취소` : `${b.title} 이뤘어요로 표시`}
+              aria-pressed={b.done}
+              className="tap -m-2.5 flex shrink-0 items-center justify-center rounded-full p-2.5 focus-ring"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "flex size-[22px] items-center justify-center rounded-full border-[1.5px] transition-colors",
+                  b.done ? "border-approve-fill bg-approve-wash text-approve" : "border-dim hover:border-foreground",
+                )}
+              >
+                {b.done ? <CheckMark className="size-3.5" strokeWidth={3} /> : null}
+              </span>
+            </button>
+          )}
           {viewOnly ? (
-            <span className={cn("min-w-0 flex-1 py-2 text-body break-keep", b.done ? "text-dim" : "text-foreground")}>{b.title}</span>
+            <span className={cn("min-w-0 flex-1 py-2 text-body break-keep", b.done ? "text-dim" : "text-foreground")}>
+              {b.title}
+              {b.done ? <span className="sr-only"> · 이뤘어요</span> : null}
+            </span>
           ) : editing === b.id ? (
             <Input
               autoFocus
