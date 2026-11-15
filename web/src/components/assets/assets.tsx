@@ -356,7 +356,7 @@ export function Assets() {
                     {offBand.length ? (
                       <p className="flex items-baseline gap-2 text-ui text-ink">
                         <span aria-hidden className="size-1.5 shrink-0 self-center rounded-full bg-foreground" />
-                        범위 밖
+                        <span className="shrink-0 whitespace-nowrap">범위 밖</span>
                         <span className="text-aside text-dim">{fixes.join(" · ")}</span>
                       </p>
                     ) : (
