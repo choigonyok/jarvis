@@ -66,6 +66,9 @@ var photoHTTP = &http.Client{Timeout: 30 * time.Second}
 
 // Photo opens one size of a photo: thumb (small, for tiles) or display.
 func (c *Client) Photo(ctx context.Context, id, size string) (Photo, error) {
+	if c.local != nil {
+		return c.local.photo(ctx, id, size)
+	}
 	if !uuidLike(id) {
 		return Photo{}, ErrNoPhoto
 	}
@@ -194,6 +197,9 @@ const cookieChunk = 3180
 func (c *Client) Upload(ctx context.Context, block, kind string, body []byte) (string, error) {
 	if _, err := c.typed(ctx, block, ""); err != nil {
 		return "", err
+	}
+	if c.local != nil {
+		return c.local.upload(ctx, kind, body)
 	}
 	if !photoKinds[kind] {
 		return "", event.ValidationError{Msg: "사진은 jpeg, png, webp 만 올릴 수 있어요"}
@@ -347,6 +353,16 @@ func (c *Client) app(ctx context.Context, method, path string, body any, out any
 // out; a push that does not go is not the change's failure, so it is sent on
 // its own and only logged.
 func (c *Client) tell(ctx context.Context, block string, extra map[string]any) {
+	if c.local != nil {
+		c.pushes.Add(1)
+		go func() {
+			defer c.pushes.Done()
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			c.local.tell(ctx, block, extra)
+		}()
+		return
+	}
 	if c.cfg.AppURL == "" {
 		return
 	}

@@ -377,8 +377,8 @@ func Assemble(cfg *config.Config, d Deps) (*Assembly, error) {
 		goalModule.Look(look)
 		goalModule.Change(change)
 	}
-	// 커플 공간(uniple 의 디데이·버킷·습관·자유·지도): calendar-svc 가 하나뿐인
-	// uniple 세션으로 읽고 쓴다. 운영자의 것만 - 손님 쪽 세션은 없다.
+	// 커플 공간(디데이·버킷·습관·자유·지도): calendar-svc 에서 운영자로 읽고 쓴다.
+	// 운영자의 대화에만 둔다 - 손님은 일정 탭에서 쓴다.
 	if cfg.CalendarURL != "" && !cfg.Guest {
 		coupleModule := couple.New(cfg.CalendarURL, cfg.APIToken)
 		modules.Add(coupleModule)

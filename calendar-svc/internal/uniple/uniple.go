@@ -73,6 +73,10 @@ type Client struct {
 
 	// pushes are the partner's pushes still on their way (tell).
 	pushes sync.WaitGroup
+
+	// local is the couple's space kept in this database (local.go). When it is
+	// set, nothing goes to uniple: no session, no token, no app server.
+	local *local
 }
 
 func Open(ctx context.Context, dsn string, cfg Config) (*Client, error) {
@@ -230,6 +234,9 @@ func (c *Client) token(ctx context.Context, force bool) (string, error) {
 // rest calls PostgREST. A 401 gets one forced refresh and one retry: an
 // access token can be revoked before its stated expiry.
 func (c *Client) rest(ctx context.Context, method, path string, body any, out any) error {
+	if c.local != nil {
+		return c.local.rest(ctx, method, path, body, out)
+	}
 	var encoded []byte
 	if body != nil {
 		var err error
@@ -277,6 +284,9 @@ func (c *Client) rest(ctx context.Context, method, path string, body any, out an
 
 // calendar finds the couple's calendar block once.
 func (c *Client) calendar(ctx context.Context) (block, space, me string, err error) {
+	if c.local != nil {
+		return c.local.calendar(ctx, c.cfg.BlockID)
+	}
 	if _, err := c.token(ctx, false); err != nil {
 		return "", "", "", err
 	}
@@ -303,7 +313,7 @@ func (c *Client) calendar(ctx context.Context) (block, space, me string, err err
 		return "", "", "", err
 	}
 	if len(blocks) == 0 {
-		return "", "", "", errors.New("uniple 에서 캘린더를 찾지 못했습니다")
+		return "", "", "", errors.New("커플 공간에서 캘린더를 찾지 못했습니다")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -503,7 +513,7 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		return event.Event{}, err
 	}
 	if strings.Contains(e.ID, "#") {
-		return event.Event{}, event.ValidationError{Msg: "반복 일정의 하루만 바꾸는 것은 uniple 앱에서 해 주세요"}
+		return event.Event{}, event.ValidationError{Msg: "반복 일정의 하루만 바꿀 수는 없어요. 그날을 지우고 새 일정으로 넣어 주세요"}
 	}
 	block, space, me, err := c.calendar(ctx)
 	if err != nil {
@@ -609,6 +619,10 @@ func derived(r row) error {
 // uniple has no member list this token can read, but every entry carries its
 // owner, and the first one that is not mine is theirs. Cached: it does not change.
 func (c *Client) partnerID(ctx context.Context, block, me string) (string, error) {
+	if c.local != nil {
+		_, other, err := c.local.who(ctx)
+		return other, err
+	}
 	c.mu.Lock()
 	known := c.partner
 	c.mu.Unlock()

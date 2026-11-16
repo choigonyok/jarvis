@@ -18,6 +18,7 @@ import (
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
+	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 )
@@ -46,8 +47,14 @@ type Server struct {
 	log        *slog.Logger
 	notify     *notify.Client
 	loops      *health.Loops
-	// couple is the rest of the couple's space (couple.go). Nil off uniple.
+	// couple is the rest of the couple's space (couple.go). Nil on the old
+	// Postgres calendar.
 	couple Couple
+	// native is a backend that reads and writes as whoever asks (the space
+	// kept here): the guest's requests are the guest's, with nothing to turn
+	// around. On uniple everything is the operator's and the guest's side is
+	// made by swapping (seen, Flipped).
+	native bool
 	// holidays are the public holidays the calendar marks. Nil marks none.
 	holidays Holidays
 }
@@ -100,6 +107,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		case s.token == "" || same(got, "Bearer "+s.token):
 		case s.guestToken != "" && same(got, "Bearer "+s.guestToken):
 			r.Header.Set("X-Jarvis-Side", "partner")
+			r = r.WithContext(uniple.As(r.Context(), "partner"))
 		default:
 			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 			return
@@ -129,7 +137,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range events {
-		events[i] = seen(r, events[i])
+		events[i] = s.seen(r, events[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
@@ -138,8 +146,8 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 // too, their own entries are "me". The service and uniple only ever hold the
 // operator's side. Swapping is its own inverse, so the same call takes what the
 // guest sent back to the service's side.
-func seen(r *http.Request, e event.Event) event.Event {
-	if r.Header.Get("X-Jarvis-Side") != "partner" {
+func (s *Server) seen(r *http.Request, e event.Event) event.Event {
+	if r.Header.Get("X-Jarvis-Side") != "partner" || s.native {
 		return e
 	}
 	switch e.Owner {
@@ -168,7 +176,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 불러오지 못했습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, seen(r, e))
+	writeJSON(w, http.StatusOK, s.seen(r, e))
 }
 
 func (s *Server) put(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +185,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
 		return
 	}
-	saved, ok := s.save(w, r, seen(r, in))
+	saved, ok := s.save(w, r, s.seen(r, in))
 	if !ok {
 		return
 	}
@@ -189,7 +197,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	if in.ID == "" {
 		s.notify.Send(added(saved, r.Header.Get("X-Jarvis-Side") == "partner"))
 	}
-	writeJSON(w, http.StatusOK, seen(r, saved))
+	writeJSON(w, http.StatusOK, s.seen(r, saved))
 }
 
 // edit is a person's change to an entry on the screen. An edit keeps whoever
@@ -210,10 +218,10 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 불러오지 못했습니다.")
 		return
 	}
-	in = seen(r, in)
+	in = s.seen(r, in)
 	in.ID, in.Source = existing.ID, existing.Source
 	if saved, ok := s.save(w, r, in); ok {
-		writeJSON(w, http.StatusOK, seen(r, saved))
+		writeJSON(w, http.StatusOK, s.seen(r, saved))
 	}
 }
 
@@ -251,7 +259,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 삭제하지 못했습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, seen(r, gone))
+	writeJSON(w, http.StatusOK, s.seen(r, gone))
 }
 
 func (s *Server) holidayList(w http.ResponseWriter, r *http.Request) {
@@ -288,7 +296,7 @@ func (s *Server) conflicts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range found {
-		found[i] = seen(r, found[i])
+		found[i] = s.seen(r, found[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conflicts": found})
 }

@@ -94,6 +94,9 @@ export function Calendar() {
   // short edit sheet, and sees the days' photos without changing them -
   // uniple holds one session, the operator's.
   const owner = useRole() === "owner";
+  // Who changes the days' photos: the operator, and the guest once the space
+  // is kept in jarvis (the space says edit) - on uniple the guest only looks.
+  const photoWriter = owner || space.data?.edit === true;
   const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string; occurrence?: CalendarEvent } | null>(null);
   // New entries taken at the way in and not on the calendar yet (a 202): said
   // on their day by name until they are, as a decision says 반영 중 - with
@@ -506,10 +509,10 @@ export function Calendar() {
               {holidays?.[selected] ? <span className="text-faint"> · {holidays[selected]}</span> : null}
             </h3>
 
-            {owner || dayPhotos.length ? (
+            {photoWriter || dayPhotos.length ? (
               // The day's photos: tap one to look at it, make it the day's face
-              // or take it off; a new one goes on the day itself. The guest
-              // looks and saves.
+              // or take it off; a new one goes on the day itself. One who only
+              // reads the space looks and saves.
               <div className="mb-3 px-2">
                 <PhotoTiles
                   assets={dayPhotos.map((p) => ({
@@ -528,7 +531,7 @@ export function Calendar() {
                     })
                   }
                   trailing={
-                    picking || !owner ? null : calendarBlock ? (
+                    picking || !photoWriter ? null : calendarBlock ? (
                       <PickPhotos
                         variant="quiet"
                         label={dayPhotos.length ? "사진" : "이 날에 사진 추가"}
@@ -551,7 +554,7 @@ export function Calendar() {
                 />
                 {picking ? (
                   <PickBar count={picking.size} busy={dropping} onCancel={() => setPicking(null)} onRemove={() => askDrop([...picking])} />
-                ) : owner && dayPhotos.length > 1 ? (
+                ) : photoWriter && dayPhotos.length > 1 ? (
                   <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-ml-2">
                     여러 장 지우기
                   </Button>
@@ -733,7 +736,7 @@ export function Calendar() {
             return (
               <>
                 <SaveAction asset={p.asset} name={`${p.date}-${i + 1}`} />
-                {owner && !p.cover ? (
+                {photoWriter && !p.cover ? (
                   <ViewerAction
                     onClick={() => {
                       setViewing(null);
@@ -743,7 +746,7 @@ export function Calendar() {
                     대표로
                   </ViewerAction>
                 ) : null}
-                {owner ? (
+                {photoWriter ? (
                   <ViewerAction danger onClick={() => askDrop([p.id])}>
                     지우기
                   </ViewerAction>
@@ -759,7 +762,7 @@ export function Calendar() {
         <AlertDialogContent className="z-[80]">
           <AlertDialogHeader>
             <AlertDialogTitle>사진 {toDrop.length}장을 지울까요?</AlertDialogTitle>
-            <AlertDialogDescription>이 날에서 빠지고 상대의 uniple 앱에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+            <AlertDialogDescription>이 날에서 빠지고 상대 화면에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

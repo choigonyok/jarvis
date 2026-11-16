@@ -45,7 +45,7 @@ type CheckInput struct {
 }
 
 // shared is said after every write: the partner's phone has it already.
-const shared = " 상대의 uniple 앱에도 바로 보입니다."
+const shared = " 상대 화면에도 바로 보입니다."
 
 // Change puts adding, changing, removing and checking on the board.
 func (m *Module) Change(b *tool.Board) {

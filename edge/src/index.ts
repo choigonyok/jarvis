@@ -231,7 +231,7 @@ function mindRoute(method: string, path: string): boolean {
 }
 
 /**
- * What the 일정 screens change in the rest of the couple's space (uniple): a
+ * What the 일정 screens change in the rest of the couple's space: a
  * block, and what is on one - an anniversary, a wish, a note, a habit's day, a
  * date on the map. `rest` follows api/couple/. The same list as the hand's
  * (output-svc calls.go), which refuses anything else again.
@@ -286,8 +286,9 @@ function goalsRoute(method: string, rest: string): boolean {
  */
 function calendarRoute(method: string, path: string): boolean {
   // A photo's bytes, uploaded before it is put anywhere: they do not go
-  // through the way in, and a photo nothing names shows nowhere.
-  if (method === "POST") return path === "couple/uploads";
+  // through the way in, and a photo nothing names shows nowhere. How far each
+  // has read the news is theirs alone and changes nothing else.
+  if (method === "POST") return path === "couple/uploads" || path === "couple/news/seen";
   if (method !== "GET") return false;
   const id = "[A-Za-z0-9_-]+";
   return (
@@ -442,7 +443,7 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "mind" && !/^api\/(jobs\/|reminders$|checklists(\/|$)|goals(\/|$))/.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/((jobs|checklists|calendar)\/|goals(\/|$))/.test(rest.join("/"))) {
+  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/((jobs|checklists|calendar|couple)\/|goals(\/|$))/.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if (name === "calendar" && !calendarRoute(request.method, rest.join("/"))) {

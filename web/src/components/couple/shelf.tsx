@@ -68,7 +68,7 @@ export const won = (n: number) => `${new Intl.NumberFormat("ko-KR").format(Math.
 function WrittenInTheApp() {
   // The guest's screen says it once for every block.
   const viewOnly = useViewOnly();
-  return viewOnly ? null : <p className="mt-1 text-aside text-faint">여기서는 보기만 해요. 쓰기와 고치기는 uniple 앱에서 해요.</p>;
+  return viewOnly ? null : <p className="mt-1 text-aside text-faint">이 블록은 보기만 해요. 쓰기와 고치기는 아직 없어요.</p>;
 }
 
 function useViewer() {
@@ -257,7 +257,7 @@ export function DiaryPage({ block, space, onChanged }: { block: Block; space: Sp
               ) : e.comments ? (
                 <p className="mt-2 flex items-center gap-1 text-aside text-faint">
                   <MessageCircle aria-hidden className="size-3.5" />
-                  댓글 {e.comments}개 - uniple 앱에서 봐요
+                  댓글 {e.comments}개
                 </p>
               ) : null}
             </li>
@@ -341,7 +341,7 @@ export function BudgetPage({ block, space, onChanged }: { block: Block; space: S
                             })}
                           </ul>
                         ) : (
-                          <p className="text-aside text-faint">지출 내역은 uniple 앱에서 봐요.</p>
+                          <p className="text-aside text-faint">지출 내역은 아직 여기서 볼 수 없어요.</p>
                         )}
                       </div>
                     ) : null}

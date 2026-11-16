@@ -45,7 +45,7 @@ export function EditBlocks({
       onOpenChange={onOpenChange}
       guard={moved}
       title="블록 편집"
-      description="순서를 바꾸면 상대의 uniple 앱 홈도 같은 순서가 돼요."
+      description="순서를 바꾸면 상대 화면의 홈도 같은 순서가 돼요."
       height="tall"
     >
       {open ? <Editor blocks={blocks} onClose={() => onOpenChange(false)} onChanged={onChanged} onMoved={setMoved} /> : null}
@@ -230,7 +230,7 @@ function Editor({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{away?.title} 블록을 보관할까요?</AlertDialogTitle>
-            <AlertDialogDescription>홈에서 사라지고 상대의 uniple 앱에서도 보이지 않아요. 안의 내용은 그대로 남고, 이 화면의 보관함에서 다시 꺼낼 수 있어요.</AlertDialogDescription>
+            <AlertDialogDescription>홈에서 사라지고 상대 화면에서도 보이지 않아요. 안의 내용은 그대로 남고, 이 화면의 보관함에서 다시 꺼낼 수 있어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

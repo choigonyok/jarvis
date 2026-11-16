@@ -35,7 +35,7 @@ export function ReorderSheet<T extends { id: string }>({
       onOpenChange={onOpenChange}
       guard={moved}
       title={title}
-      description="순서를 바꾸면 상대의 uniple 앱에도 같은 순서로 보여요."
+      description="순서를 바꾸면 상대 화면에도 같은 순서로 보여요."
       height="tall"
     >
       {open ? <Order items={items} label={label} onSave={onSave} onClose={() => onOpenChange(false)} onMoved={setMoved} /> : null}

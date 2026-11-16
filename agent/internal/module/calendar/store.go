@@ -38,7 +38,7 @@ type Event struct {
 	// operator's decision.
 	Source    string `json:"source"` // jarvis | me | partner
 	UpdatedAt string `json:"updatedAt"`
-	// Set by the uniple backend - a calendar two people share. EndDate is the
+	// Set by the couple's calendar - one two people share. EndDate is the
 	// last day of a multi-day entry; Owner is me | partner | shared and only
 	// labels (both people see everything); Recurrence marks a repeating entry,
 	// whose single days carry ids of the form "<series>#<date>".

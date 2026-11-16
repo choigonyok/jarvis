@@ -303,7 +303,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
         <AlertDialogContent className="z-[80]">
           <AlertDialogHeader>
             <AlertDialogTitle>{asked?.rep ? "대표 사진을 지울까요?" : "이 사진을 지울까요?"}</AlertDialogTitle>
-            <AlertDialogDescription>상대의 uniple 앱에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+            <AlertDialogDescription>상대 화면에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

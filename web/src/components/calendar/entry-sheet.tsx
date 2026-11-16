@@ -88,7 +88,7 @@ export function EntrySheet({
       title={occurrence ? "반복 일정 고치기" : event ? "일정 고치기" : "일정 추가"}
       description={
         occurrence
-          ? "바꾸면 반복되는 모든 날이 바뀌어요. 하루만 바꾸는 것은 uniple 앱에서 해요."
+          ? "바꾸면 반복되는 모든 날이 바뀌어요. 하루만 바꾸려면 그날을 지우고 새 일정으로 넣어요."
           : event
             ? undefined
             : "저장하면 바로 공유 캘린더에 들어가 상대 폰에도 보여요."

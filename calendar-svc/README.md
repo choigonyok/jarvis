@@ -3,13 +3,41 @@
 일정의 **저장만** 여기 있습니다. 승인 카드·MCP 도구 스키마·되돌림 가능 여부는
 agent 에 남아 있습니다.
 
-## 저장소: uniple
+## 저장소: 이 Postgres 의 couple 스키마
 
-일정은 **uniple**(커플 앱)의 공유 캘린더에 있습니다. `CALENDAR_BACKEND=uniple`
-일 때 이 서비스는 Postgres 표 대신 uniple 의 Supabase(`api.uniple.app`)를
-로그인한 사용자 자격으로 호출합니다. API 계약은 그대로라 agent 와 웹은 바뀐
-것을 모릅니다. `postgres` 로 되돌리면 예전 표(`commitments`, 기존 6개 그대로)를
-씁니다.
+일정과 커플 공간(일정 칸의 우리·캘린더)은 이 Postgres 의 `couple` 스키마에 있습니다
+(`CALENDAR_BACKEND=local`, 기본, 마이그레이션 107). 표는 uniple 이 쓰던 모양 그대로(같은 이름·같은 칸)라서,
+행을 화면의 JSON 으로 바꾸는 코드(`internal/uniple`)는 하나이고, uniple 에서 옮겨 오는 것은 표마다 id 째로
+복사하는 일입니다 - mind 와 에이전트가 쥐고 있는 일정 id(`calendarId`)가 그대로 맞습니다.
+
+- **질의는 여기서 풉니다.** 클라이언트가 uniple 의 PostgREST 에 하던 호출(표·조건·순서·딸린 항목)을
+  `internal/uniple/local.go` 가 SQL 로 바꿔 같은 JSON 으로 답합니다. 쓰는 조건은 eq·neq·gt·gte·lt·lte·in·is
+  와 일정 기간의 or 하나, 딸린 항목은 블록의 항목들·일기의 답글·가계부의 지출입니다. 표와 칸 이름은 시작할 때
+  읽은 목록에 있는 것만 SQL 에 들어가고 값은 늘 인자입니다.
+- **uniple 서버가 하던 일**(`local_rpc.go`): id·시각 기본값, 쓰기마다 소식 한 줄(무엇을 누가), 앨범의 사람별
+  최신 사진, 디데이를 캘린더에 쓰기(기념일마다 종일 공유 일정 - 매년 반복이면 매년 - 와 만난 날을 1일로 센
+  100일 단위·N주년 중 지난 것과 앞으로 열 개. `origin_key` 로 다시 써도 id 가 같음), 지도의 얼굴 사진, 세계
+  지도의 나라 사진, 앨범 지우기·고정, 그날의 대표 사진, 블록 설정 고치기.
+- **두 사람이 각자 씁니다.** 요청한 사람이 '나'입니다(`uniple.As`): 손님 토큰이면 손님, 아니면 운영자. 손님의
+  체크·버킷·사진은 손님 이름으로 남고, 손님에게 보내는 답은 손님의 쪽에서 읽은 것이라 뒤집지 않습니다.
+- **사진은 DB 에**(`couple.media`): 올린 그대로(화면이 긴 변 1080 으로 줄여 보냄)와 목록용 긴 변 360 JPEG.
+  백업이 DB 와 함께 갑니다. 그림으로 읽히지 않는 파일은 받지 않습니다.
+- **소식**은 두 사람의 쓰기 모두이고(보는 사람에게 상대 것은 partner), 어디까지 읽었는지는 사람마다 서버가
+  쥡니다(`couple.news_seen`, `GET /couple/news` 의 `seen`, `POST /couple/news/seen`) - 기기마다 따로 남지 않습니다.
+- **상대 알림**: 습관 체크, 지도 장소의 첫 사진, 세계 지도의 나라 사진, 앨범의 찍은 사진은 jarvis 알림으로
+  상대에게 갑니다(손님에게는 손님 알림함으로). 새 일정은 예전처럼 `PUT /events` 가 알립니다.
+- **옮겨 오기**: `calendar-svc import-uniple [-replace]` - 서비스를 멈추고 돌립니다(DEPLOY.md). 비어 있지 않은
+  로컬 공간은 `-replace` 없이는 덮지 않습니다. 아무것도 옮기지 않은 채 local 로 뜨면 공간 하나·두 사람('나'·'상대')
+  ·캘린더 블록으로 시작합니다.
+- 반복 일정의 하루만 고치는 것은 아직 없습니다(그날을 지우고 새 일정으로). 문화·맛집 기록장·일기장·데이트
+  가계부는 옮겨 온 그대로 보기만 합니다.
+
+`postgres` 로 되돌리면 예전 표(`commitments`, 기존 6개 그대로)를 씁니다.
+
+## uniple (옮겨 오기 전과 되돌릴 때)
+
+`CALENDAR_BACKEND=uniple` 이면 이 서비스는 uniple(커플 앱)의 Supabase(`api.uniple.app`)를 로그인한 사용자
+자격으로 호출합니다. API 계약은 같습니다.
 
 - **비공식입니다.** uniple 은 공개 API 가 없고, 표·컬럼 이름은 앱 번들에서 읽었습니다.
   앱이 바뀌면 깨지며, 그때는 빈 캘린더가 아니라 오류로 드러납니다.
@@ -73,11 +101,11 @@ agent 에 남아 있습니다.
 
 ## 커플 공간의 나머지
 
-uniple 의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스트, 습관 체크, 데이트 지도, 자유 블록, 그리고 사진·일기·가계부 같은
-것들. 같은 세션(회전하는 토큰은 이 프로세스 하나가 쥔다)으로 앱이 읽는 표를 앱처럼 읽고, 앱이 쓰는 칸만 쓴다. 표와 칸은 앱
-번들의 블록 정의(`itemTable`·`itemSelectColumns`)와 쓰기 코드에서 읽었고, 번들에 없는 칸은 anon 키로 하나씩 있는지 확인했다.
-uniple 이 아닐 때(`CALENDAR_BACKEND=postgres`)는 404 다. 손님 토큰은 읽기만 하고 나와 상대를 뒤집어 받는다(`Space.Flipped` 등 -
-손님이 자기 앱에서 보듯이). 손님의 쓰기는 403 이다(세션이 운영자 것이라 손님의 체크가 운영자 이름으로 들어가게 된다).
+커플 공간의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스트, 습관 체크, 데이트 지도, 자유 블록, 그리고 사진·일기·가계부 같은
+것들. 표와 칸은 uniple 앱 번들의 블록 정의(`itemTable`·`itemSelectColumns`)와 쓰기 코드에서 읽은 그대로이고(번들에 없는 칸은
+anon 키로 하나씩 있는지 확인했다), 로컬 공간도 같은 표를 쓴다. 예전 표(`CALENDAR_BACKEND=postgres`)일 때는 404 다. 로컬
+공간에서는 손님도 자기 이름으로 읽고 쓴다(`GET /couple` 의 `edit` 가 true). uniple 일 때는 손님 토큰이 읽기만 하고 나와 상대를
+뒤집어 받으며(`Space.Flipped` 등), 쓰기는 403 이다(세션이 운영자 것이라 손님의 체크가 운영자 이름으로 들어가게 된다).
 
 블록 열두 종류를 모두 읽는다. 문화 기록장(`log_entries`)·맛집 기록장(`food_entries`)·커플 일기장(`diary_entries`, 답글
 `diary_comments`)·데이트 가계부(`budget_dates`, 지출 `budget_expenses`)는 **읽기만** 한다: 별점의 단위, 누가 냈는지의 값, 답글이
@@ -96,7 +124,8 @@ uniple 의 오류는 무엇을 하면 되는지로 답한다: 로그인 풀림·
 | GET | `/couple` | 두 사람(별명), 만난 날(`spaces.anniversary_date`), 주의 첫날, 홈의 블록과 그 항목. 지도는 지역마다 대표 사진 하나 |
 | GET | `/couple/blocks/{id}` | 블록 하나. 지도는 사진 전부와 기록 |
 | GET | `/couple/blocks/{id}/checks?from=&to=` | 습관 블록의 두 사람 체크 |
-| GET | `/couple/news?limit=` | 공간에서 한 일(앱의 알림 목록), 그 항목의 지금 모습과 함께 |
+| GET | `/couple/news?limit=` | 공간에서 한 일, 그 항목의 지금 모습과 함께, 그리고 묻는 사람이 어디까지 읽었는지(`seen`) |
+| POST | `/couple/news/seen` | `{at}` 까지 읽었다(뒤로 가지 않음) |
 | GET | `/couple/photos?from=&to=` · `/couple/cover?date=` | 캘린더 날의 사진, 캘린더 카드가 보이는 사진 |
 | GET | `/couple/media/{asset}?size=thumb\|display` | 사진 한 장(공개 저장소에서 받아 그대로, 브라우저 캐시 7일) |
 | POST · PATCH | `/couple/blocks` · `/couple/blocks/{id}` | 블록 추가(버킷·습관·자유, 앱과 같은 개수 한도) · 이름 바꾸기 |

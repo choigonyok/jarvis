@@ -496,7 +496,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             <AlertDialogTitle>
               {asked === "picked" ? `사진 ${picking?.size ?? 0}장을 지울까요?` : asked?.rep ? "대표 사진을 지울까요?" : "이 사진을 지울까요?"}
             </AlertDialogTitle>
-            <AlertDialogDescription>상대의 uniple 앱에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+            <AlertDialogDescription>상대 화면에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>
@@ -786,7 +786,7 @@ function RecordForm({
           <AlertDialogHeader>
             <AlertDialogTitle>이 기록을 지울까요?</AlertDialogTitle>
             <AlertDialogDescription>
-              {photos.length ? `사진 ${photos.length}장도 함께 지워져요. ` : ""}상대의 uniple 앱에서도 사라지고, 되돌릴 수 없어요.
+              {photos.length ? `사진 ${photos.length}장도 함께 지워져요. ` : ""}상대 화면에서도 사라지고, 되돌릴 수 없어요.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

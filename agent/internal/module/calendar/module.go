@@ -117,7 +117,7 @@ func (m *Module) Preview(_ context.Context, a action.Action) (action.Card, error
 		return action.Card{
 			Title:       "일정을 추가합니다",
 			Facts:       []action.Fact{{Label: "더할 일정", Value: line(eventOf(in))}},
-			Consequence: "uniple 커플 캘린더에 추가되고, 상대방 화면에도 바로 보입니다.",
+			Consequence: "커플 캘린더에 추가되고, 상대방 화면에도 바로 보입니다.",
 		}, nil
 
 	case KindUpdate:

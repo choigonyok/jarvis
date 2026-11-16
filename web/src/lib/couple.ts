@@ -140,6 +140,8 @@ export type Block = {
 };
 
 export type Space = {
+  /** Whether the asker may change the space from here: the guest, once it is kept in jarvis. */
+  edit?: boolean;
   me: Person;
   partner?: Person;
   /** The day they met, YYYY-MM-DD: that day is D+1. */
@@ -188,8 +190,8 @@ export const OPENS: ReadonlySet<BlockType> = new Set([
 ]);
 
 /**
- * The blocks shown here but written in uniple: how the app fills in their
- * rows - a rating's scale, who paid, a reply - is in code it has not shown.
+ * The blocks shown but not written: what uniple kept in them is read as it
+ * came, and nothing here writes their rows yet - so none is added either.
  */
 export const READ_ONLY: ReadonlySet<BlockType> = new Set(["log", "food", "diary", "budget"]);
 
@@ -203,10 +205,6 @@ export const ADDABLE: { type: BlockType; cap: number; line: string }[] = [
   { type: "map", cap: 1, line: "가 본 시/군/구를 사진으로 채우는 지도" },
   { type: "worldmap", cap: 1, line: "가 본 나라를 사진으로 채우는 세계 지도" },
   { type: "album", cap: 1, line: "둘이 올리는 사진을 한곳에" },
-  { type: "log", cap: 1, line: "영화·전시·공연 기록 - 여기선 보기만, 쓰기는 uniple 앱에서" },
-  { type: "food", cap: 1, line: "맛집·카페 기록 - 여기선 보기만, 쓰기는 uniple 앱에서" },
-  { type: "diary", cap: 1, line: "둘이 쓰는 일기 - 여기선 보기만, 쓰기는 uniple 앱에서" },
-  { type: "budget", cap: 1, line: "데이트에 쓴 돈 - 여기선 보기만, 쓰기는 uniple 앱에서" },
 ];
 
 /* ───────────────────────────── reading and writing ───────────────────────────── */

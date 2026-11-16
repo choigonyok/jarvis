@@ -161,7 +161,7 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
         )}
       </section>
 
-      <Panel open={setting} onOpenChange={setSetting} title="만난 날" description="바꾸면 상대의 uniple 앱의 디데이와 캘린더 기념일도 함께 바뀌어요.">
+      <Panel open={setting} onOpenChange={setSetting} title="만난 날" description="바꾸면 디데이와 캘린더의 기념일도 함께 바뀌어요.">
         {setting ? (
           <StartForm
             block={block}
@@ -334,7 +334,7 @@ function AnniversaryForm({ block, item, onClose, onSaved }: { block: Block; item
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>이 기념일을 지울까요?</AlertDialogTitle>
-            <AlertDialogDescription>상대의 uniple 앱과 캘린더에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+            <AlertDialogDescription>캘린더와 상대 화면에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

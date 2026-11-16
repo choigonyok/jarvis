@@ -43,6 +43,11 @@ func (s *stubCouple) Check(_ context.Context, block, date, _ string) (uniple.Che
 	return uniple.Check{ID: "c1", Date: date, Who: "me"}, nil
 }
 
+// Native is uniple's way: everything is the operator's, and the guest only reads.
+func (s *stubCouple) Native() bool { return false }
+
+func (s *stubCouple) NewsSeen(context.Context) (string, error) { return "", nil }
+
 func call(h http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)

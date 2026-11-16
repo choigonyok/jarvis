@@ -138,7 +138,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
       <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
       <p className="mt-2 text-ui text-dim">
         <span className="tabular-nums">{photos.length}</span>장
-        {photos.length !== shown.length ? <span className="text-faint"> · 동영상 {photos.length - shown.length}개는 uniple 앱에서 봐요</span> : null}
+        {photos.length !== shown.length ? <span className="text-faint"> · 동영상 {photos.length - shown.length}개는 여기서 볼 수 없어요</span> : null}
       </p>
       <div className={cn("mt-3 flex flex-wrap gap-2", viewOnly && "hidden")}>
         {/* Only where the camera opens: a desktop browser ignores capture
@@ -215,7 +215,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
         <AlertDialogContent className="z-[80]">
           <AlertDialogHeader>
             <AlertDialogTitle>사진 {asked.length}장을 지울까요?</AlertDialogTitle>
-            <AlertDialogDescription>앨범에서 빠지고 상대의 uniple 앱에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+            <AlertDialogDescription>앨범에서 빠지고 상대 화면에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

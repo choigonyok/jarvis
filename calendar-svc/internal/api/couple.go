@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
@@ -60,6 +61,12 @@ type Couple interface {
 	ArchiveBlock(ctx context.Context, id string) error
 	OrderBlocks(ctx context.Context, ids []string) error
 	SetStart(ctx context.Context, block, title, date string) error
+
+	// Native is whether it reads and writes as whoever asks (uniple.As): the
+	// space kept here does, uniple holds the operator's session only.
+	Native() bool
+	NewsSeen(ctx context.Context) (string, error)
+	SeeNews(ctx context.Context, at string) error
 }
 
 var _ Couple = (*uniple.Client)(nil)
@@ -67,24 +74,31 @@ var _ Couple = (*uniple.Client)(nil)
 // WithCouple opens the couple's space next to the calendar.
 func (s *Server) WithCouple(c Couple) *Server {
 	s.couple = c
+	s.native = c != nil && c.Native()
 	return s
 }
+
+// flip is whether what goes back to this request is turned to the guest's
+// side here: only on uniple, where everything is read as the operator.
+func (s *Server) flip(r *http.Request) bool { return guest(r) && !s.native }
 
 func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	read := func(pattern string, h http.HandlerFunc) { mux.HandleFunc("GET "+pattern, s.auth(s.owner(h))) }
 	write := func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.auth(s.owner(h))) }
 
-	// The guest reads it all from their side; they change it in the app.
+	// The guest reads it all from their side. Kept here, they change it as
+	// themselves too; on uniple they change it in the app (owner).
 	read("/couple", func(w http.ResponseWriter, r *http.Request) {
 		space, err := s.couple.Space(r.Context())
-		if guest(r) {
+		if s.flip(r) {
 			space = space.Flipped()
 		}
+		space.Edit = !guest(r) || s.native
 		s.answer(w, space, err)
 	})
 	read("/couple/blocks/{block}", func(w http.ResponseWriter, r *http.Request) {
 		b, err := s.couple.Block(r.Context(), r.PathValue("block"))
-		if guest(r) {
+		if s.flip(r) {
 			b = b.Flipped()
 		}
 		s.answer(w, b, err)
@@ -92,7 +106,7 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	read("/couple/blocks/{block}/checks", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		checks, err := s.couple.Checks(r.Context(), r.PathValue("block"), q.Get("from"), q.Get("to"))
-		if guest(r) {
+		if s.flip(r) {
 			checks = uniple.FlippedChecks(checks)
 		}
 		s.answer(w, map[string]any{"checks": checks}, err)
@@ -100,11 +114,38 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	read("/couple/news", func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		news, err := s.couple.News(r.Context(), limit)
-		if guest(r) {
+		if s.flip(r) {
 			news = uniple.FlippedNews(news)
 		}
-		s.answer(w, map[string]any{"news": news}, err)
+		if err != nil {
+			s.answer(w, nil, err)
+			return
+		}
+		// Up to when the asker has read it, wherever they read it.
+		seen, err := s.couple.NewsSeen(r.Context())
+		if err != nil {
+			s.log.Warn("소식을 어디까지 읽었는지 읽지 못했습니다", "err", err)
+		}
+		s.answer(w, map[string]any{"news": news, "seen": seen}, nil)
 	})
+	// The asker has read the news up to at: every device of theirs counts from it.
+	mux.HandleFunc("POST /couple/news/seen", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		if s.couple == nil {
+			writeErr(w, http.StatusNotFound, "커플 공간이 없는 캘린더예요.")
+			return
+		}
+		var in struct {
+			At string `json:"at"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if _, err := time.Parse(time.RFC3339Nano, in.At); err != nil {
+			writeErr(w, http.StatusBadRequest, "at 은 RFC 3339 시각이어야 해요.")
+			return
+		}
+		s.answer(w, ok, s.couple.SeeNews(r.Context(), in.At))
+	}))
 	read("/couple/photos", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		photos, err := s.couple.DayPhotos(r.Context(), q.Get("from"), q.Get("to"))
@@ -341,17 +382,18 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 
 var ok = map[string]bool{"ok": true}
 
-// owner keeps changes to the couple's space to the operator's side. uniple
-// holds one session - the operator's - so a guest's check or wish would be
-// filed under the operator's name; the guest reads the space from their own
-// side and changes it in their own app.
+// owner keeps changes to the couple's space on uniple to the operator's side.
+// uniple holds one session - the operator's - so a guest's check or wish would
+// be filed under the operator's name; there the guest reads the space from
+// their own side and changes it in their own app. The space kept here takes
+// each one's changes as their own.
 func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.couple == nil {
-			writeErr(w, http.StatusNotFound, "uniple 을 쓰지 않는 캘린더예요.")
+			writeErr(w, http.StatusNotFound, "커플 공간이 없는 캘린더예요.")
 			return
 		}
-		if guest(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if guest(r) && !s.native && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			writeErr(w, http.StatusForbidden, "이 화면에서는 보기만 해요. 바꾸는 것은 uniple 앱에서 해 주세요.")
 			return
 		}
@@ -400,15 +442,15 @@ func trouble(err error) (int, string) {
 	case errors.As(err, &refused) && refused.Down():
 		return http.StatusServiceUnavailable, "uniple 이 지금 응답하지 않아요. 잠시 뒤 다시 해 주세요."
 	case errors.As(err, &refused) && refused.Forbidden():
-		return http.StatusForbidden, "uniple 이 이 변경을 받지 않았어요. 상대가 만든 것은 상대만 바꿀 수 있는 항목일 수 있어요."
+		return http.StatusForbidden, "이 변경은 받지 않았어요. 상대가 만든 것은 상대만 바꿀 수 있는 항목일 수 있어요."
 	case errors.As(err, &refused) && refused.Missing():
-		return http.StatusNotFound, "uniple 에 그 항목이 없어요. 다른 기기에서 지웠을 수 있으니 새로고침해 보세요."
+		return http.StatusNotFound, "그 항목이 없어요. 다른 기기에서 지웠을 수 있으니 새로고침해 보세요."
 	case errors.As(err, &refused) && refused.Duplicate():
 		return http.StatusConflict, "이미 같은 것이 있어요."
 	case errors.As(err, &refused):
-		return http.StatusBadRequest, "uniple 이 이 값을 받지 않았어요. 입력을 확인해 주세요."
+		return http.StatusBadRequest, "이 값을 받지 않았어요. 입력을 확인해 주세요."
 	default:
-		return http.StatusBadGateway, "uniple 에서 처리하지 못했어요. 잠시 뒤 다시 해 주세요."
+		return http.StatusBadGateway, "처리하지 못했어요. 잠시 뒤 다시 해 주세요."
 	}
 }
 

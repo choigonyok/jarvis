@@ -16,7 +16,7 @@ import (
 // of it. The assistant's additions still go up on a card first - it is the
 // assistant's guess, not what a person typed.
 //
-// The rest of the couple's space in uniple (the D-day, bucket lists, habit
+// The rest of the couple's space (the D-day, bucket lists, habit
 // checks, the date map) goes the same way, to the same adapter.
 
 // CalendarDoor is where a screen's change to the calendar goes.

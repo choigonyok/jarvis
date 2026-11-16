@@ -71,6 +71,25 @@ export function useNews(limit = 40) {
   );
 }
 
+/**
+ * Up to when whoever asks has read the news, kept by the space so every device
+ * of theirs counts from it: "" when never, undefined while it is read.
+ */
+export function useNewsSeen() {
+  return useResource<string>("couple:news:seen", (signal) => readCouple<{ seen?: string }>("/news?limit=1", signal).then((r) => r.seen ?? ""), {
+    interval: LIVE,
+  });
+}
+
+/** The news read up to at, on every device of the asker's. Nothing waits on it: a miss leaves this device's own mark. */
+export function markNewsSeen(at: number) {
+  void fetch("/api/couple/news/seen", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ at: new Date(at).toISOString() }),
+  }).catch(() => {});
+}
+
 /** The photos pinned to calendar days between two days; none read when not wanted. */
 export function useDayPhotos(from: string, to: string, wanted = true) {
   return useResource<DayPhoto[]>(wanted ? `couple:photos:${from}:${to}` : null, (signal) =>

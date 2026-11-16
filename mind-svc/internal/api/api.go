@@ -64,7 +64,7 @@
 //	POST /api/calendar                an entry a person filled in on the calendar's form (calendar.go)
 //	PATCH /api/calendar/{id}          an entry as a person left it on the screen
 //	DELETE /api/calendar/{id}         an entry a person took off the screen
-//	POST|PATCH|DELETE /api/couple/... the couple's space in uniple (a block, an anniversary, a wish, a habit's day, a date on the map), to the calendar's adapter as it came
+//	POST|PATCH|DELETE /api/couple/... the couple's space (a block, an anniversary, a wish, a habit's day, a date on the map), to the calendar's adapter as it came - the guest's as the guest's
 //
 // /api and the console need a token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect. The
@@ -382,9 +382,11 @@ func (s *Server) Handler() http.Handler {
 	write("POST /api/calendar", owner, s.addEntry)
 	write("PATCH /api/calendar/{id}", s.person, s.editEntry)
 	write("DELETE /api/calendar/{id}", s.person, s.removeEntry)
-	write("POST /api/couple/{path...}", owner, s.coupleWrite)
-	write("PATCH /api/couple/{path...}", owner, s.coupleWrite)
-	write("DELETE /api/couple/{path...}", owner, s.coupleWrite)
+	// The couple's space: each of the two changes it as themselves (the
+	// adapter refuses the guest where it holds one person's session only).
+	write("POST /api/couple/{path...}", s.person, s.coupleWrite)
+	write("PATCH /api/couple/{path...}", s.person, s.coupleWrite)
+	write("DELETE /api/couple/{path...}", s.person, s.coupleWrite)
 	mux.HandleFunc("GET /api/commands/{key}", s.person(s.commandResult))
 	return mux
 }

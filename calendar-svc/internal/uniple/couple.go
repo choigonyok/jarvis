@@ -36,6 +36,9 @@ type Space struct {
 	Anniversary string  `json:"anniversary,omitempty"`
 	WeekStart   string  `json:"weekStart"`
 	Blocks      []Block `json:"blocks"`
+	// Edit is whether the asker may change the space from here (the API
+	// says): the operator always, the guest when the space is kept here.
+	Edit bool `json:"edit"`
 }
 
 // Block is one card on the home. The items that come with it depend on its
@@ -1789,7 +1792,7 @@ func (c *Client) ArchiveBlock(ctx context.Context, id string) error {
 		return ErrBlock
 	}
 	if rows[0].Type == "calendar" {
-		return event.ValidationError{Msg: "캘린더 블록은 uniple 앱에서 보관해 주세요"}
+		return event.ValidationError{Msg: "캘린더 블록은 보관할 수 없어요"}
 	}
 	q = url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}, "select": {"id"}}
 	var saved []struct {
@@ -1945,7 +1948,7 @@ func (c *Client) SetStart(ctx context.Context, block, title, date string) error 
 		return err
 	}
 	if len(saved) == 0 {
-		return event.ValidationError{Msg: "만난 날은 uniple 앱에서 바꿔 주세요"}
+		return event.ValidationError{Msg: "만난 날을 바꾸지 못했어요. 새로고침한 뒤 다시 해 주세요"}
 	}
 	var start []ddayRow
 	q = url.Values{"block_id": {"eq." + block}, "is_start_date": {"eq.true"}, "select": {"id,title,date,is_start_date"}}

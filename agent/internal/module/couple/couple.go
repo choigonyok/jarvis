@@ -1,4 +1,4 @@
-// Package couple is the couple's space in uniple beyond the calendar: the
+// Package couple is the couple's space beyond the calendar: the
 // D-day, the bucket lists, the habit checks, the free notes and the date map,
 // as the 일정 tab's 우리 shows them. The conversation reads it, and changes it
 // when the operator asks - a wish added or done, an anniversary, a habit day,
@@ -27,8 +27,7 @@ import (
 // Name is the module.
 const Name = "couple"
 
-// Module reads and writes the couple's space at calendar-svc, which holds the
-// one uniple session.
+// Module reads and writes the couple's space at calendar-svc, as the operator.
 type Module struct {
 	url, token string
 	http       *http.Client
@@ -314,7 +313,7 @@ type LookInput struct {
 
 // Look puts the space on the board: one row, its blocks given by id.
 func (m *Module) Look(b *tool.Board) {
-	tool.Add(b, "couple", "커플 공간(uniple)의 디데이·버킷·습관 체크·자유 기록·데이트 지도. "+
+	tool.Add(b, "couple", "커플 공간(일정 탭의 우리)의 디데이·버킷·습관 체크·자유 기록·데이트 지도. "+
 		"block 을 비우면 블록 목록(id)과 요약·최근 소식, 주면 그 블록의 항목과 항목 id. 일정은 calendar 로 읽는다.",
 		func(ctx context.Context, in LookInput) (string, error) {
 			s, err := m.space(ctx)
@@ -430,9 +429,9 @@ func (m *Module) gist(ctx context.Context, s space, b block, today string) strin
 		return "사진은 일정 탭에서 보고 올린다"
 	case "log", "food", "diary", "budget":
 		n := len(b.Log) + len(b.Food) + len(b.Diary) + len(b.Budget)
-		return fmt.Sprintf("기록 %d개(최근). 일정 탭에서 보고, 쓰기는 uniple 앱에서", n)
+		return fmt.Sprintf("기록 %d개(최근). 일정 탭에서 보기만 한다", n)
 	}
-	return "uniple 앱에서 여는 블록"
+	return "여기서 열지 않는 블록"
 }
 
 func (m *Module) detail(ctx context.Context, s space, b block, in LookInput) (string, error) {
@@ -531,7 +530,7 @@ func (m *Module) detail(ctx context.Context, s space, b block, in LookInput) (st
 	case "calendar":
 		out = append(out, "일정은 look 의 calendar 로 읽고, 바꾸는 것은 일정 도구(카드)로 한다.")
 	default:
-		out = append(out, "대화로는 읽고 쓰지 않는 블록이다. 일정 탭에서 본다(문화·맛집·일기·가계부는 쓰기가 uniple 앱에서).")
+		out = append(out, "대화로는 읽고 쓰지 않는 블록이다. 일정 탭에서 본다(문화·맛집·일기·가계부는 보기만 한다).")
 	}
 	return strings.Join(out, "\n"), nil
 }

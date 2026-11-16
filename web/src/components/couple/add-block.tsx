@@ -42,7 +42,7 @@ export function AddBlock({
       open={open}
       onOpenChange={onOpenChange}
       title="블록 추가"
-      description="더하면 상대의 uniple 앱 홈에도 생겨요. 앱에서 열어요 라고 적힌 블록은 여기서는 이름만 보여요."
+      description="더하면 상대 화면의 홈에도 생겨요."
       height="tall"
     >
       <ul className="divide-y divide-edge-soft">

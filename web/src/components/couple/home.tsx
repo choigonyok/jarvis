@@ -62,9 +62,7 @@ export function CoupleHome() {
         <div>
           <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">우리 공간을 불러오지 못했어요</p>
           <Failed onRetry={space.reload} className="mt-3">
-            {space.error.message === "502" || /uniple/.test(space.error.message)
-              ? "uniple 에 닿지 못했어요. 로그인이 풀렸으면 상태 탭의 캘린더 줄을 보세요."
-              : space.error.message}
+            {space.error.message === "502" ? "캘린더 서비스에 닿지 못했어요. 상태 탭의 캘린더 줄을 보세요." : space.error.message}
           </Failed>
         </div>
       ) : !space.data ? (
@@ -180,7 +178,7 @@ function Together({ space, dday }: { space: Space; dday?: Block }) {
         <span>만난 날이 아직 없어요</span>
         {door}
       </p>
-      <p className="mt-2 text-ui text-dim">uniple 앱의 디데이에서 정하면 여기서 날을 세요.</p>
+      <p className="mt-2 text-ui text-dim">디데이에서 만난 날을 정하면 여기서 날을 세요.</p>
     </>
   );
   if (!dday) return <div>{body}</div>;
@@ -282,7 +280,7 @@ function BlockCard({ block, space, map, onChanged }: { block: Block; space: Spac
               ))}
             </ul>
           ) : (
-            <p className="text-ui text-faint">함께 본 영화·책·공연을 uniple 앱에서 남겨요.</p>
+            <p className="text-ui text-faint">아직 남긴 문화 기록이 없어요.</p>
           )}
         </Card>
       );
@@ -302,7 +300,7 @@ function BlockCard({ block, space, map, onChanged }: { block: Block; space: Spac
               ))}
             </ul>
           ) : (
-            <p className="text-ui text-faint">함께 간 맛집을 uniple 앱에서 남겨요.</p>
+            <p className="text-ui text-faint">아직 남긴 맛집이 없어요.</p>
           )}
         </Card>
       );
@@ -321,7 +319,7 @@ function BlockCard({ block, space, map, onChanged }: { block: Block; space: Spac
               <p className="mt-0.5 line-clamp-2 text-ui break-keep text-ink">{e.body}</p>
             </div>
           ) : (
-            <p className="text-ui text-faint">둘이 쓰는 일기는 uniple 앱에서 써요.</p>
+            <p className="text-ui text-faint">아직 쓴 일기가 없어요.</p>
           )}
         </Card>
       );
@@ -341,7 +339,7 @@ function BlockCard({ block, space, map, onChanged }: { block: Block; space: Spac
               ))}
             </ul>
           ) : (
-            <p className="text-ui text-faint">데이트에 쓴 돈은 uniple 앱에서 적어요.</p>
+            <p className="text-ui text-faint">아직 적은 지출이 없어요.</p>
           )}
         </Card>
       );

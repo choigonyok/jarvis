@@ -149,9 +149,19 @@ MEMORY.md)은 손님 home 볼륨 안이고 바뀌면 손님 알림함으로(`mem
 두 에이전트는 응답마다 `X-Jarvis-Agent: owner|guest` 를 붙이고, 게이트웨이는 경로와 맞지 않는
 응답을 버리고 502 를 돌려준다. 같은 터널·같은 포트(8080)였을 때 Workers VPC 의 연결이 다른
 에이전트에 붙는 일이 실제로 있었다(2026-10-08) - 그래서 포트도 나눴다.
-손님 쪽 캘린더는 관점이 뒤집힌다: 손님 jarvis 의 캘린더 저장소(`FromPartnerSide`)가 나↔상대를
-바꿔 읽고 쓰고, 손님이 만든 개인 일정은 calendar-svc 가 상대방(uniple partner) 이름으로 저장한다.
+손님 쪽 캘린더와 커플 공간은 손님의 것으로 읽힌다: 손님 토큰으로 온 요청은 calendar-svc 가 손님을 '나'로 읽고 쓰고
+(couple 스키마에는 손님 이름으로 남는다), uniple 을 쓰는 동안은 운영자로 읽은 것을 나↔상대로 바꿔 돌려준다.
 Google OAuth 앱이 테스트 모드라 손님 이메일을 Google Cloud 의 테스트 사용자에도 넣어야 한다.
+
+**커플 공간(일정 칸)은 이 Postgres 에 있다(`couple` 스키마, 마이그레이션 107).** uniple 에서 옮겨 오는 것은
+한 번이다: ① `db-migrate` 로 107 ② `docker compose stop calendar` - uniple 의 로그인 토큰은 쓸 때마다 회전해서
+calendar-svc 와 가져오기가 같이 쓰면 세션이 끊긴다 ③ `docker compose run --rm --no-deps calendar import-uniple`
+(공간·두 사람·블록·일정·항목·소식을 id 그대로, 행이 가리키는 사진을 `couple.media` 로. 결과 JSON 의 `missing`
+에 못 옮긴 사진이, `skipped` 에 uniple 이 주지 않은 표가 나온다. 이미 옮긴 뒤에는 `import-uniple -replace`)
+④ `.env` 에 `CALENDAR_BACKEND` 가 있으면 지우거나 `local` 로 ⑤ calendar 를 새로 빌드해 띄운다. 그 뒤로 uniple
+앱과는 동기화되지 않는다(되돌리려면 `CALENDAR_BACKEND=uniple` - 그동안 여기서 쓴 것은 uniple 에 없다).
+손님의 커플 쓰기가 닿으려면 mind(손님 쓰기 경로)·게이트웨이(손님의 `mind/api/couple`, `couple/news/seen`)·웹도
+같이 올린다.
 
 **에이전트의 `/mcp` 와 `/intercept` 는 게이트웨이에서 막는다.** `/mcp` 는 Claude Code 가
 루프백으로 부르는 도구 서버라 인증이 없다. 밖에서 닿으면 승인 카드를 건너뛰는 길이 된다.

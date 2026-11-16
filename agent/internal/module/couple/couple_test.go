@@ -155,7 +155,7 @@ func TestABlockWithItsItems(t *testing.T) {
 func TestAddsGoWhereTheBlockKeepsThem(t *testing.T) {
 	_, f, _, change := module(t)
 	ctx := context.Background()
-	if out, err := change.Do(ctx, "couple.add", map[string]any{"block": "b-b", "text": "바다 보러 가기"}); err != nil || !strings.Contains(out, "상대의 uniple 앱") {
+	if out, err := change.Do(ctx, "couple.add", map[string]any{"block": "b-b", "text": "바다 보러 가기"}); err != nil || !strings.Contains(out, "상대 화면") {
 		t.Fatalf("버킷: %q %v", out, err)
 	}
 	if _, err := change.Do(ctx, "couple.add", map[string]any{"block": "b-d", "text": "200일"}); err == nil {

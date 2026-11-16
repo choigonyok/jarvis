@@ -6,6 +6,7 @@ import { ChevronLeft, Pencil } from "lucide-react";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useSpace } from "@/components/couple/use-space";
 import { writeCouple, type Block } from "@/lib/couple";
 import { Header, PageTop } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
@@ -21,11 +22,16 @@ import { cn } from "@/lib/utils";
  * 우리 above its name - it is one of 우리's, not a place of its own.
  */
 /**
- * The guest reads the space here and changes it in their own uniple app:
- * uniple holds the operator's session only, and a change made with it would
- * go under the operator's name. Every way to change something asks this.
+ * Whether this screen only reads the space. The operator always writes; the
+ * guest writes when the space is kept in jarvis (the space says edit) and
+ * only reads while it is uniple's, whose one session is the operator's.
+ * Every way to change something asks this.
  */
-export const useViewOnly = () => useRole() !== "owner";
+export function useViewOnly() {
+  const guest = useRole() !== "owner";
+  const space = useSpace(guest);
+  return guest && space.data?.edit !== true;
+}
 
 export function CoupleScreen({
   back,
@@ -128,7 +134,7 @@ function Rename({ block, onClose, onRenamed }: { block: Block; onClose: () => vo
   return (
     <form onSubmit={(e) => void save(e)} className="space-y-3">
       <Input autoFocus surface="glass" value={title} maxLength={40} onChange={(e) => setTitle(e.target.value)} aria-label="블록 이름" />
-      <p className="text-aside text-faint">상대의 uniple 앱에서도 이 이름으로 보여요.</p>
+      <p className="text-aside text-faint">상대 화면에서도 이 이름으로 보여요.</p>
       {error ? (
         <p role="alert" className="text-aside text-reject">
           {error}

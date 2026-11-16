@@ -1,6 +1,6 @@
 import { MIND_WRITES, pathProxy } from "@/lib/proxy";
 
-// The rest of the couple's space (uniple): read at its adapter, as it stands -
+// The rest of the couple's space: read at its adapter, as it stands -
 // a block, a habit's days, what the two did, the photos - and changed at the
 // way in, like the calendar. The gateway lets through only these
 // (calendarRoute, coupleWrite) and the hand only what it lists.
@@ -29,11 +29,13 @@ export const GET = pathProxy(`${CALENDAR_URL}/couple`, {
 const write = pathProxy(`${MIND_WRITES}/api/couple`, { label: "우리", allow: writable });
 
 // A photo's bytes go straight to the adapter, which hands back the asset to
-// put somewhere - that putting is a change like any other, at the way in.
-const upload = pathProxy(`${CALENDAR_URL}/couple`, { label: "우리", allow: (p) => p === "uploads" });
+// put somewhere - that putting is a change like any other, at the way in. So
+// does how far one has read the news: it is theirs alone and changes nothing.
+const direct = (p: string) => p === "uploads" || p === "news/seen";
+const straight = pathProxy(`${CALENDAR_URL}/couple`, { label: "우리", allow: direct });
 
 export function POST(request: Request, context: { params: Promise<{ path: string[] }> }) {
-  return context.params.then(({ path }) => (path.join("/") === "uploads" ? upload : write)(request, context));
+  return context.params.then(({ path }) => (direct(path.join("/")) ? straight : write)(request, context));
 }
 export const PATCH = write;
 export const DELETE = write;

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Failed } from "@/components/shell/failed";
 import type { KoreaMapData } from "@/components/couple/korea-map";
-import { useNews } from "@/components/couple/use-space";
+import { markNewsSeen, useNews, useNewsSeen } from "@/components/couple/use-space";
 import type { News, Space } from "@/lib/couple";
 import { openTarget } from "@/lib/focus";
 import { SAY } from "@/lib/say";
@@ -120,9 +120,10 @@ const when = (at: string) => {
 const newestOf = (list: News[]) => list.reduce((most, n) => Math.max(most, when(n.at)), 0);
 
 /**
- * The moment of the newest news the operator has looked at, kept on this
- * device: what came after it is new. A browser that keeps nothing, or keeps
- * something that is no moment, shows nothing as new rather than everything.
+ * The moment of the newest news the operator has looked at: what came after
+ * it is new. The space keeps it for every device of theirs (useNewsSeen) and
+ * this device keeps its own as well, the later of the two counting. A device
+ * that keeps nothing, or keeps something that is no moment, starts from now.
  */
 const SEEN = "couple:news:seen";
 function seenAt(): number {
@@ -143,25 +144,29 @@ function markSeen(at: number) {
 /** The newest thing the partner did, one line on the home; the rest in a sheet. */
 export function NewsLine({ space, map }: { space: Space | undefined; map: KoreaMapData | null }) {
   const news = useNews();
+  const kept = useNewsSeen();
   const [open, setOpen] = useState(false);
-  const [seen, setSeen] = useState(seenAt);
+  const [mine, setMine] = useState(seenAt);
+  const seen = Math.max(mine, when(kept.data ?? ""));
   // What was new when the sheet opened stays marked while it is open.
   const [before, setBefore] = useState(seen);
   const theirs = news.data?.find((n) => n.who === "partner");
-  // The first time on this device nothing is new: the mark starts from now.
   const fresh = seen ? (news.data ?? []).filter((n) => n.who === "partner" && when(n.at) > seen).length : 0;
   const newest = news.data ? newestOf(news.data) : 0;
-  if (!seen && newest) {
-    setSeen(newest);
+  // The first time anywhere nothing is new: the mark starts from now.
+  if (!seen && newest && kept.data !== undefined) {
+    setMine(newest);
     markSeen(newest);
+    markNewsSeen(newest);
   }
   if (!news.data && !news.error) return <div aria-hidden className="h-11" />;
 
   function show() {
     setBefore(seen);
     if (newest > seen) {
-      setSeen(newest);
+      setMine(newest);
       markSeen(newest);
+      markNewsSeen(newest);
     }
     setOpen(true);
   }

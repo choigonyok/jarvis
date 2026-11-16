@@ -418,9 +418,10 @@ services:
       # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       NOTIFY_URL: http://input:8101
-      # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
-      # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
-      CALENDAR_BACKEND: ${CALENDAR_BACKEND:-uniple}
+      # 일정과 커플 공간의 저장소. local 은 이 Postgres 의 couple 스키마(마이그레이션 107),
+      # uniple 은 커플 앱을 비공식 Supabase 호출로 쓴다 - 옮겨 오기(import-uniple) 전과
+      # 되돌릴 때만(calendar-svc/README.md). postgres 는 예전 표(commitments).
+      CALENDAR_BACKEND: ${CALENDAR_BACKEND:-local}
       UNIPLE_URL: ${UNIPLE_URL:-https://api.uniple.app}
       # 앱 번들에 공개돼 있는 anon 키. 비밀이 아니지만 앱이 바꾸면 따라 바꿔야 한다.
       UNIPLE_ANON_KEY: ${UNIPLE_ANON_KEY:-}

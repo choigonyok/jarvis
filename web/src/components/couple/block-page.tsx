@@ -63,7 +63,7 @@ export function BlockPage({ id }: { id: string }) {
       ) : (
         <div>
           <h1 className="text-display leading-[1.2] font-semibold tracking-tight text-foreground">{b.title}</h1>
-          <p className="mt-3 text-ui text-dim">{BLOCK_NAME[b.type] ?? "이 블록"}은 uniple 앱에서 열어요.</p>
+          <p className="mt-3 text-ui text-dim">{BLOCK_NAME[b.type] ?? "이 블록"}은 여기서 열 수 없어요.</p>
         </div>
       )}
     </CoupleScreen>
