@@ -66,6 +66,9 @@ HIDDEN = {
 app = Server("mcp-browser")
 _upstream: ClientSession | None = None
 
+# 로그인·파일 도구가 넣을 탭을 browser-use 에 물을 때 기다리는 시간(초). 넘으면 묻지 못한 것으로 본다.
+FOCUS_TIMEOUT = 15.0
+
 
 async def handle_list_tools(_ctx, _params: PaginatedRequestParams | None) -> ListToolsResult:
     tools = (await _upstream.list_tools()).tools
@@ -92,6 +95,30 @@ def with_notices(result: CallToolResult) -> CallToolResult:
     return result
 
 
+async def focused_url() -> str | None:
+    """browser-use 가 보고 있는 탭의 주소 - 모델이 browser_get_state 로 보는 그 화면이다. 로그인·파일 도구는
+    이 주소의 탭에 넣는다(upload.page_for). 같은 browser_get_state 를 불러 그 url 을 읽는다(browser-use 밖에서는
+    어느 탭인지 알 길이 없다 - 창이 여럿이면 '보이는' 탭도 여럿이다). 브라우저가 떠 있지 않으면 묻지 않고(물으면
+    browser-use 가 브라우저를 띄운다), 묻지 못했거나 답에 url 이 없으면 None - 그때 도구는 앞에 보이는 탭을 쓴다."""
+    if _upstream is None or not chromium_alive():
+        return None
+    try:
+        res = await _upstream.call_tool("browser_get_state", {"include_screenshot": False}, read_timeout_seconds=FOCUS_TIMEOUT)
+    except Exception:  # noqa: BLE001 - 모르면 보이는 탭으로
+        return None
+    if getattr(res, "is_error", False):
+        return None
+    for c in getattr(res, "content", None) or []:
+        if getattr(c, "type", "") != "text":
+            continue
+        try:
+            url = json.loads(c.text).get("url")
+        except (ValueError, AttributeError):
+            return None
+        return url if isinstance(url, str) and url else None
+    return None
+
+
 async def call_tool(params: CallToolRequestParams) -> CallToolResult:
     if params.name in HIDDEN:
         return CallToolResult(
@@ -101,7 +128,7 @@ async def call_tool(params: CallToolRequestParams) -> CallToolResult:
     if params.name == upload.TOOL["name"]:
         args = params.arguments or {}
         try:
-            text = await upload.upload(list(args.get("paths") or []), args.get("selector"))
+            text = await upload.upload(list(args.get("paths") or []), args.get("selector"), await focused_url())
         except Exception as e:
             return CallToolResult(content=[{"type": "text", "text": str(e)}], isError=True)
         return CallToolResult(content=[{"type": "text", "text": text}])
@@ -113,7 +140,7 @@ async def call_tool(params: CallToolRequestParams) -> CallToolResult:
         return CallToolResult(content=[{"type": "text", "text": text}])
     if params.name == login.TOOL["name"]:
         try:
-            text = await login.fill()
+            text = await login.fill(await focused_url())
         except Exception as e:
             return CallToolResult(content=[{"type": "text", "text": str(e)}], isError=True)
         return CallToolResult(content=[{"type": "text", "text": text}])
