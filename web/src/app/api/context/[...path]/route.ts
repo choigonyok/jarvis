@@ -2,14 +2,15 @@ import { pathProxy } from "@/lib/proxy";
 
 // context-svc, for what the console shows of it: the phone setup on the 상태
 // screen, a day's way about on the 위치 screen, the guest's phone's own setup
-// (위치's 내 폰 연결), and 위치 등록 - where one's own phone is now, made its
-// region. The operator's setup carries the phone's credentials (OwnTracks'
-// password, the shortcuts' signal token): only the operator reaches it - the
-// guest reaches the track, the guest's own setup and the guest's own 위치 등록
-// alone (lib/role.ts), and the gateway opens nothing else of context to the
-// guest's token either. The rest of context-svc - the regions as a list, the
-// state of the devices, the phones' mode and commands - is not reachable this
-// way.
+// (위치's 내 폰 연결), 위치 등록 - where one's own phone is now, made its
+// region - and the nights on the 수면 screen. The operator's setup carries the
+// phone's credentials (OwnTracks' password, the shortcuts' signal token): only
+// the operator reaches it - the guest reaches the track, the guest's own setup
+// and the guest's own 위치 등록 alone (lib/role.ts), and the gateway opens
+// nothing else of context to the guest's token either: not the setup, not the
+// nights. The rest of context-svc - the regions as a list, the state of the
+// devices, the phones' mode and commands, sending sleep (the phone's own door)
+// - is not reachable this way.
 const CONTEXT_URL = process.env.CONTEXT_URL ?? "http://localhost:8103";
 const allowed = new Set([
   "owntracks/setup",
@@ -21,6 +22,8 @@ const allowed = new Set([
   "transit/stops",
   "transit/guest/stops",
   "transit/lines",
+  // 수면: the operator's nights.
+  "sleep",
 ]);
 // 위치 등록: where the viewer's phone is now, made its region - the operator's
 // own, or the guest's own (lib/role.ts and the gateway let the guest reach

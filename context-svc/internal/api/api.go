@@ -12,6 +12,12 @@
 //	                         events; its arrivals go to the guest's own inbox.
 //	POST   /signals          {source, kind, state, at?} iOS Shortcuts, the Mac
 //	                         collector, Home Assistant (bearer: the signal token)
+//	POST   /sleep            what the phone's health store says of sleep - a
+//	                         shortcut's samples, a night summed, or Health Auto
+//	                         Export's - made into nights (bearer: the signal
+//	                         token; sleep.go)
+//	GET    /sleep?from=&to=  the nights, newest first, and the last week and
+//	                         month summed up - the 수면 screen (bearer: API token)
 //	GET    /now              where and in what state, now (bearer: API token)
 //	GET    /visits?from=&to= stays in regions
 //	GET    /travel?days=60   the journeys between regions, from the stays,
@@ -46,8 +52,9 @@
 //	                         feeds - and nudges while a route's hours last
 //	                         (transit.go)
 //
-// Only /owntracks and /signals face the phone, through the gateway; each
-// has its own credential, so the phone never holds the stack's token.
+// Only /owntracks, /signals and POST /sleep face the phone, through the
+// gateway; each has its own credential, so the phone never holds the stack's
+// token.
 //
 // When the state in one place changes (driving, in a meeting, home, at
 // work, focus), an event says so: context.state, for whatever listens -
@@ -124,6 +131,9 @@ type Server struct {
 	// lastFix is when a fix of the operator's phone was last passed on
 	// (announceFix), under ownerMu.
 	lastFix time.Time
+	// One send of sleep at a time: each day's night is read, merged and
+	// written back (sleep.go).
+	sleepMu sync.Mutex
 }
 
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
@@ -149,6 +159,8 @@ func (s *Server) Handler() http.Handler {
 	// 고장 난 단축어의 폭주를 둘 다 막도록 경로마다 요청 수를 제한한다.
 	mux.HandleFunc("POST /owntracks", limit(newBucket(120, 2), s.owntracks))
 	mux.HandleFunc("POST /signals", limit(newBucket(60, 1), s.signals))
+	mux.HandleFunc("POST /sleep", limit(newBucket(30, 0.5), s.postSleep))
+	mux.HandleFunc("GET /sleep", s.bearer(s.getSleep))
 	mux.HandleFunc("GET /now", s.bearer(s.current))
 	mux.HandleFunc("GET /now/guest", s.bearerOrGuest(s.guestNow))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
@@ -964,12 +976,27 @@ func (s *Server) announceFix(rep report, at time.Time) {
 
 var kindRE = regexp.MustCompile(`^[a-z][a-z0-9_.-]{1,63}$`)
 
+// signaller is whether a request may post to the doors the signal token
+// opens (/signals, /sleep): that token, or the stack's own. Neither reads.
+func (s *Server) signaller(r *http.Request) bool {
+	auth := r.Header.Get("Authorization")
+	return s.cfg.SignalToken != "" && same(auth, "Bearer "+s.cfg.SignalToken) || s.cfg.Token != "" && same(auth, "Bearer "+s.cfg.Token)
+}
+
+// signal keeps one state: its raw report, and the state at its kind - what
+// /now reads, and the health baseline reads back from the raw reports.
+func (s *Server) signal(ctx context.Context, source, kind, state string, at time.Time, raw []byte) error {
+	if err := s.st.Raw(ctx, orDefault(source, "unknown"), kind, at, raw); err != nil {
+		return err
+	}
+	return s.st.Set(ctx, "signal:"+kind, map[string]string{"state": state, "source": source}, at)
+}
+
 // signals takes one state change from a shortcut, the Mac collector or a
 // home hub: {source, kind, state, at?}. A missed one is corrected by the
 // next, since each says the state, not the change.
 func (s *Server) signals(w http.ResponseWriter, r *http.Request) {
-	auth := r.Header.Get("Authorization")
-	if !(s.cfg.SignalToken != "" && same(auth, "Bearer "+s.cfg.SignalToken)) && !(s.cfg.Token != "" && same(auth, "Bearer "+s.cfg.Token)) {
+	if !s.signaller(r) {
 		writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 		return
 	}
@@ -997,12 +1024,8 @@ func (s *Server) signals(w http.ResponseWriter, r *http.Request) {
 	if t, err := time.Parse(time.RFC3339, in.At); err == nil {
 		at = t
 	}
-	if err := s.st.Raw(r.Context(), orDefault(in.Source, "unknown"), in.Kind, at, raw); err != nil {
-		s.fail(w, "원본을 남기지 못했습니다", err)
-		return
-	}
-	if err := s.st.Set(r.Context(), "signal:"+in.Kind, map[string]string{"state": in.State, "source": in.Source}, at); err != nil {
-		s.fail(w, "상태를 남기지 못했습니다", err)
+	if err := s.signal(r.Context(), in.Source, in.Kind, in.State, at, raw); err != nil {
+		s.fail(w, "신호를 남기지 못했습니다", err)
 		return
 	}
 	s.Check(r.Context())
@@ -1256,8 +1279,17 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 				{"when": "충전기 분리", "body": `{"source":"shortcut","kind":"device.charging","state":"off"}`},
 				{"when": "매일 아침: 심박 변이(건강 샘플 찾기의 값)", "body": `{"source":"shortcut","kind":"health.hrv","state":"<값>"}`},
 				{"when": "매일 아침: 안정 시 심박", "body": `{"source":"shortcut","kind":"health.hr_rest","state":"<값>"}`},
-				{"when": "매일 아침: 어젯밤 수면 시간(시간)", "body": `{"source":"shortcut","kind":"health.sleep","state":"<값>"}`},
 			},
+		},
+		// The nights' sleep: its own door, the same token. A night kept there
+		// is also the baseline's health.sleep, so no shortcut sends that.
+		"sleep": map[string]any{
+			"url": base + "/sleep",
+			"examples": []map[string]string{
+				{"when": "매일 아침: 지난 1일의 수면 분석 샘플(반복 결과)", "body": `{"source":"shortcut","samples":[{"start":"<시작 날짜(ISO 8601)>","end":"<종료 날짜(ISO 8601)>","value":"<값>"}]}`},
+				{"when": "다른 앱이 합한 밤", "body": `{"source":"<앱 이름>","start":"<누운 시각>","end":"<깬 시각>","asleepMinutes":"<잔 분>"}`},
+			},
+			"note": "Health Auto Export는 REST API 자동화의 URL을 이 주소로, 헤더에 같은 Authorization을 넣고 지표는 수면 분석만, 형식은 JSON으로 두면 돼요.",
 		},
 	}
 	w.Header().Set("Cache-Control", "no-store")

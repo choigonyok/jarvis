@@ -22,7 +22,7 @@ export type Hub = {
 };
 
 /**
- * Seventeen screens are more than a thumb bar can hold - six is the limit before
+ * Eighteen screens are more than a thumb bar can hold - six is the limit before
  * a slot is too narrow for its word (two-syllable words, 320px). So the bar
  * names six places, by what you came for, and a place's screens sit in the
  * header where the name was: going between them costs no row, and each stays
@@ -63,6 +63,7 @@ export const OWNER_HUBS: Hub[] = [
     label: "생활",
     screens: [
       { href: "/life", label: "나" },
+      { href: "/sleep", label: "수면" },
       { href: "/photos", label: "사진" },
       { href: "/location", label: "위치" },
     ],

@@ -14,7 +14,7 @@
               │ + Bearer JARVIS_EDGE_TOKEN (운영자) / JARVIS_EDGE_GUEST_TOKEN (손님)
               ▼
            jarvis-be (edge Worker)
-              │ 토큰 없으면 401, 손님 토큰은 agent-guest·input(운동 읽기·저장)·notify·tts 와 context 의 GET track·owntracks/setup/guest,
+              │ 토큰 없으면 401, 손님 토큰은 agent-guest·input(운동 읽기·저장)·notify·tts 와 context 의 GET track·owntracks/setup/guest(수면은 아님),
               │ POST owntracks/regions/guest, 손님 자기 출발 경로(transit/guest…·transit/lines)와
               │ jobs 의 작업 탭 경로(목록·하나·지시·실행·멈춤·다시·그만, 손님 토큰으로 - 손님 작업만)만,
               │ agent 는 콘솔이 쓰는 경로만
@@ -26,7 +26,7 @@
                            mind:8102 · kakaotalk:8090 · status:8096
 
 폰·맥 수집기 ─▶ jarvis-be.choigonyok.com (공개 주소: 기본 엔트리포인트)
-              POST /context/owntracks · /context/signals 와
+              POST /context/owntracks · /context/signals · /context/sleep 과
               입장권 붙은 /vnc/websockify 만. 그 밖은 토큰이 있어도 404.
               폰의 문은 주소(IPv6 은 /64)마다 1분에 120번까지, 그 뒤는 503
               (주소마다 Durable Object `PhoneDoor` 하나가 세어 어디로 와도 한 숫자).
@@ -46,6 +46,10 @@
 - 생활 탭(mind): VPC 서비스 `jarvis-mind`(호스트 `mind`, 포트 8102, 같은 터널)가
   `edge/wrangler.jsonc` 의 `MIND` 바인딩이다. 게이트웨이는 mind 의 읽기 넷(노트·지도·물건·식사)과
   노트 결정(`POST /mind/api/notes/{id}`)만 연다(`mindRoute`). 콘솔 변수 `MIND_URL`.
+- 수면(생활 → 수면): 폰의 단축어·Health Auto Export 가 공개 주소의 `POST /context/sleep` 으로 보내고(신호 토큰,
+  `/context/signals` 와 같은 문과 같은 제한), 콘솔은 `GET /context/sleep` 을 운영자 토큰으로만 읽는다(손님 토큰은
+  게이트웨이·콘솔·context-svc 셋 다 거절). 처음 올릴 때 순서: 마이그레이션 106(`context_sleep`, `db-migrate`) →
+  context-svc → 게이트웨이(새 공개 경로) → 콘솔. 게이트웨이가 늦으면 폰의 보내기가 404 로 실패할 뿐 쌓인 것은 없다.
 - 콘솔 비밀 `JARVIS_VNC_PASSWORD`: 화면 탭이 원격 화면에 낼 비밀번호(맥미니 .env 의 같은 이름과 같은 값, 8자).
 - 게이트웨이는 콘솔보다 먼저 배포한다. 공개 주소는 폰의 문만 열려 있어서, 콘솔이 옛 바인딩(기본
   엔트리포인트)으로 부르는 동안 새 게이트웨이가 올라가면 콘솔이 404 를 받는다. 바인딩을 바꿀 때는

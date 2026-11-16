@@ -1,8 +1,9 @@
 // Command context-svc knows where the operator is and in what state: the
 // phone's OwnTracks app posts fixes and region transitions, iOS Shortcuts
 // and the Mac collector post device states (CarPlay, focus, the app in
-// front). From these it keeps stays in regions (visits) and the current
-// state in one place; the raw reports are kept for a while only.
+// front), and a shortcut or Health Auto Export posts the night's sleep. From
+// these it keeps stays in regions (visits), the nights, and the current state
+// in one place; the raw reports are kept for a while only.
 //
 // It decides nothing about what to do with it. mind reads the visits as
 // what happened; the agent reads the current state as a fact for the
@@ -63,15 +64,21 @@ func main() {
 	events := notify.New(os.Getenv("INPUT_URL"), dsn, cfg.Token, log)
 
 	// Raw coordinates are kept for days, not forever: the visits made from
-	// them are what lasts.
+	// them are what lasts. So with a night's timeline: its totals last.
 	go func() {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {
-			if n, err := st.Purge(ctx, time.Now().AddDate(0, 0, -days)); err != nil {
+			before := time.Now().AddDate(0, 0, -days)
+			if n, err := st.Purge(ctx, before); err != nil {
 				log.Warn("오래된 원본을 지우지 못했습니다", "err", err)
 			} else if n > 0 {
 				log.Info("오래된 원본을 지웠습니다", "rows", n, "days", days)
+			}
+			if n, err := st.ForgetTimelines(ctx, before); err != nil {
+				log.Warn("오래된 수면 타임라인을 비우지 못했습니다", "err", err)
+			} else if n > 0 {
+				log.Info("오래된 수면 타임라인을 비웠습니다", "nights", n, "days", days)
 			}
 			select {
 			case <-ctx.Done():

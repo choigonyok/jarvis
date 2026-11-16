@@ -16,8 +16,9 @@
  *   the operator's money, messages, voice or phone setup.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
- *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) -
- *   whose own credentials the service checks, and the 화면 tab's VNC socket, which
+ *   /context/owntracks, /context/signals and /context/sleep (OwnTracks, iOS
+ *   Shortcuts, Health Auto Export) - whose own credentials the service
+ *   checks, and the 화면 tab's VNC socket, which
  *   carries a 60-second ticket the console Worker signs (a browser cannot put
  *   a header on a WebSocket; see ticketValid). A console token presented
  *   here opens nothing else: it would be one leaked secret away from every
@@ -179,7 +180,7 @@ function inputRoute(method: string, path: string): boolean {
  * 등록), and keep and read their own routes on the 출발 screen - with stops
  * near their own phone and the lines at a stop. Not the operator's phone
  * setup - it holds that phone's credentials - nor the operator's regions or
- * routes, the devices' state, or the phones' mode.
+ * routes, the devices' state, the phones' mode, or the operator's sleep.
  */
 function guestContextRoute(method: string, path: string): boolean {
   if (method === "POST") return path === "owntracks/regions/guest";
@@ -403,7 +404,10 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   }
   // The phone's own doors: their credentials are checked by the service (context-svc).
   const phone =
-    request.method === "POST" && rest.length === 1 && name === "context" && (rest[0] === "owntracks" || rest[0] === "signals");
+    request.method === "POST" &&
+    rest.length === 1 &&
+    name === "context" &&
+    (rest[0] === "owntracks" || rest[0] === "signals" || rest[0] === "sleep");
   if (!internal && !phone) return json(404, "그런 경로가 없습니다.");
   if (!internal && phone) {
     // Over the limit, the address is refused here. A limiter that fails says

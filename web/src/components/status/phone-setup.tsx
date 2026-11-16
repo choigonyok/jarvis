@@ -10,6 +10,8 @@ type Setup = {
   url: string;
   /** The operator's only: the guest's phone sends its place, nothing else. */
   signals?: { url: string; token: string; examples: { when: string; body: string }[] };
+  /** The nights' door (생활 → 수면): its own address, the same token. */
+  sleep?: { url: string; examples: { when: string; body: string }[]; note?: string };
 };
 
 /**
@@ -165,6 +167,18 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
                 {setup.signals.examples.map((e) => (
                   <CopyRow key={e.when} label={e.when} value={e.body} id={e.when} copied={copied} onCopy={copy} />
                 ))}
+                {setup.sleep ? (
+                  <>
+                    <li className="pt-4 pb-1 text-aside text-dim">
+                      수면은 주소가 따로예요. Authorization은 위와 같아요. 생활 → 수면에 하루 한 줄씩 쌓여요.
+                    </li>
+                    <CopyRow label="수면 URL" value={setup.sleep.url} id="sleep-url" copied={copied} onCopy={copy} />
+                    {setup.sleep.examples.map((e) => (
+                      <CopyRow key={e.when} label={e.when} value={e.body} id={`sleep:${e.when}`} copied={copied} onCopy={copy} />
+                    ))}
+                    {setup.sleep.note ? <li className="py-2 text-aside text-faint">{setup.sleep.note}</li> : null}
+                  </>
+                ) : null}
               </ul>
             ) : null}
             {said(5)}

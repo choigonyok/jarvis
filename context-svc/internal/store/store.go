@@ -1,6 +1,6 @@
-// Package store keeps context-svc's state in Postgres (migration 046): the
-// raw reports for a while, the regions, the visits derived from them, and
-// the current state, one value per key.
+// Package store keeps context-svc's state in Postgres (migrations 046, 106):
+// the raw reports for a while, the regions, the visits derived from them,
+// the current state, one value per key, and the nights' sleep (sleep.go).
 package store
 
 import (

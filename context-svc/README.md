@@ -9,9 +9,9 @@
 
 - **위치와 기기 신호를 서비스 하나로.** 둘 다 "지금 상태"를 말하고, 받는 방식(폰이 밀어 넣음), 보관 원칙(원본은
   짧게, 파생은 길게), 읽는 쪽(mind·agent)이 같다. 나누면 같은 "현재 상태 한 장"을 두 곳에서 합쳐야 한다.
-- **폰은 스택의 토큰을 갖지 않는다.** 게이트웨이는 `/context/owntracks` 와 `/context/signals`(POST)만 토큰
-  없이 들여보내고, 여기서 각자의 자격으로 검사한다: OwnTracks 는 HTTP Basic(`OWNTRACKS_USER`/`OWNTRACKS_PASSWORD`),
-  단축어·수집기는 신호 토큰(`CONTEXT_SIGNAL_TOKEN`). 신호 토큰으로는 아무것도 읽지 못한다.
+- **폰은 스택의 토큰을 갖지 않는다.** 게이트웨이는 `/context/owntracks`·`/context/signals`·`/context/sleep`(POST)만
+  토큰 없이 들여보내고, 여기서 각자의 자격으로 검사한다: OwnTracks 는 HTTP Basic(`OWNTRACKS_USER`/`OWNTRACKS_PASSWORD`),
+  단축어·수집기·수면 자동화는 신호 토큰(`CONTEXT_SIGNAL_TOKEN`). 신호 토큰으로는 아무것도 읽지 못한다.
 - **원본 좌표는 30일만**(`CONTEXT_RAW_DAYS`). 원본은 공용 `raw_events` 가 아니라 `context_raw` 에 둔다:
   `raw_events` 는 추가 전용 트리거가 있어 지울 수 없고, 위치 원본은 지워야 한다. 체류·현재 상태는 오래 둔다.
 - **좌표마다 판단하지 않는다.** 이벤트는 영역 진입·이탈(`location.enter`/`location.leave`, 알림함에만),
@@ -31,6 +31,8 @@ POST /owntracks   OwnTracks HTTP 모드 (Basic). {"_type":"location", lat, lon, 
                   - 하루 첫 위치 보고에는 매일 되돌리는 설정과 영역 목록 요청도(아래 '매일 되돌리는 것')
 POST /signals     {source, kind, state, at?} (Bearer 신호 토큰). kind 는 device.carplay, device.focus,
                   device.charging, mac.app 처럼 소문자 점 표기, state 는 짧은 값
+POST /sleep       건강 앱의 수면(Bearer 신호 토큰): 단축어의 수면 분석 샘플, 합한 밤, Health Auto Export 의
+                  JSON. 아래 '수면'
 ```
 
 체류는 **스스로 바로잡는다**: 진입·이탈 이벤트를 놓쳐도 다음 위치(정확도 300m 이내)가 어느 영역 안인지 말하므로
@@ -109,6 +111,8 @@ GET    /owntracks/setup/guest  상대 폰의 OwnTracks 설정 링크: 상대 계
 POST   /owntracks/regions   {name, lat, lon} 위치 등록 - 운영자 폰의 50m 영역(위 '위치 등록'). 상대 것은 /owntracks/regions/guest
 GET    /regions             PUT /regions {name, kind(home|work|camp|shop|food|other), lat, lon, radiusM, area}
 DELETE /regions/{name}
+GET    /sleep?from=&to=     밤들(깬 날 YYYY-MM-DD 나 RFC 3339, 둘 다 포함, 없으면 오늘까지 30일), 새것부터, 그리고
+                            to 까지의 7일·30일 요약과 타임라인을 두는 날수(keepDays). 손님 토큰으로는 못 읽는다
 ```
 
 ## 폰 설정 (iPhone)
@@ -128,6 +132,60 @@ jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누�
    동작은 "URL 내용 가져오기" 하나 - POST `https://jarvis-be.choigonyok.com/context/signals`, 헤더
    `Authorization: Bearer <CONTEXT_SIGNAL_TOKEN>`, JSON `{"source":"shortcut","kind":"device.carplay","state":"connected"}`.
    첫 실행 때 도메인 연결을 "항상 허용".
+
+## 수면
+
+콘솔 생활 → 수면 화면의 것(`internal/sleep`, `internal/api/sleep.go`, 표 `context_sleep` - 마이그레이션 106). 운영자 폰의
+자동화가 아침마다 `POST /sleep` 으로 건강 앱의 수면을 보내면, 하루(깬 날)에 밤 하나로 만들어 둔다.
+
+받는 모양은 셋이고 모양을 말하지 않아도 알아본다:
+
+```
+단축어 샘플        {"source":"shortcut","samples":[{"start":"2026-11-15T23:30:00+09:00","end":"…","value":"코어 수면","source":"…"}]}
+                   (목록만 보내도 된다). value 는 영어(In Bed, Asleep, Awake, Core, Deep, REM, Asleep Core…), 건강 앱의
+                   한국어(침대에 있음, 수면, 깨어 있음, 코어 수면, 깊은 수면, 렘 수면), HealthKit 의 숫자(0 침대 … 5 렘)
+합한 밤            {"start","end","asleepMinutes"?,"inBedMinutes"?,"awakeMinutes"?,"deepMinutes"?,"coreMinutes"?,"remMinutes"?,"source"?}
+                   또는 {"nights":[…]}. asleepHours 처럼 시간도 되고, 단위 없는 수("deep": 62)는 분이다.
+                   asleepMinutes 가 없으면 start~end 가 잔 시간이다
+Health Auto Export {"data":{"metrics":[{"name":"sleep_analysis","units":"hr","data":[…]}]}} - 요약(한 줄이 밤:
+                   sleepStart·sleepEnd·inBedStart·inBedEnd·totalSleep·asleep·inBed·awake·core·deep·rem·source, units 단위)과
+                   요약 안 함(한 줄이 샘플: startDate·endDate·qty·value) 둘 다. 다른 지표가 같이 와도 수면만 읽는다
+```
+
+키는 대소문자·띄어쓰기·밑줄과 상관없이 읽는다. 시각은 오프셋이 붙은 ISO 8601, `2026-11-16 07:10:00 +0900`, 1970년부터의
+초, 오프셋 없는 시각(서울로 읽음), 그리고 단축어가 날짜 형식을 정하지 않았을 때 찍는 `2026. 11. 16. 오전 7:10`·
+`Nov 16, 2026 at 7:10 AM` 까지 읽는다. 단계로 읽지 못한 값은 답의 `unknown` 에 그대로 돌려준다(iOS 가 다른 이름을 쓰면
+거기서 보인다). 본문은 다른 원본처럼 `context_raw`(kind `sleep`)에 30일 둔다 - 256KB 를 넘는 내보내기는 읽은 것만.
+
+밤 만들기:
+- 샘플은 사이가 1시간 넘게 비지 않으면 한 잠이다. 겹친 샘플은 한 번만 센다: 겹친 자리는 더 자세한 쪽(깊은 > 렘 > 코어 >
+  깸 > 수면 > 침대)이다 - 폰의 '침대에 있음' 위에 워치의 단계가 오고, 앱 둘이 같은 밤을 써도 두 배가 되지 않는다.
+- 잠의 날은 깬 날(서울)이다. 15일 밤에서 16일 아침까지는 16일, UTC 로 보내도 같다.
+- 그날 가장 오래 잔 잠이 그날의 밤이고, 다른 잠은 그 밤의 낮잠(`naps`)이다 - 평균에 넣지 않는다. 1시간이 안 되는 잠은
+  밤이 될 수 없고(그날 밤이 아직 없으면 버린다), 10분이 안 되는 잠은 낮잠으로도 두지 않는다. 낮잠으로 둔 잠보다 긴 잠이
+  그날 오면 그것이 밤이 되고 먼저 것은 낮잠이 된다.
+- 누운 때·일어난 때는 침대에 있던 처음과 끝(없으면 잠의 처음과 끝), 깬 분은 그 사이에서 자지 않은 시간(잠들기 전 포함).
+  단계(깊은·코어·렘)는 출처가 말할 때만. 잠은 없이 침대만 온 밤(워치 없는 아이폰)은 `bedOnly` 이고 잔 분이 침대에 있던 분이다.
+- **같은 밤을 다시 보내도 하나다**(밤의 키가 깬 날). 겹치는 잠이 다시 오면 더 길게 본 쪽이 남는다(10분까지는 같은 길이로
+  보고 나중 것이 남는다): 깨자마자 보내 워치가 아직 주지 않은 끝이 다음 보내기에 채워지고, 하루 창이 밤 중간에서 잘라
+  가져온 꼬리는 남은 밤을 덮지 않는다(`kept`). 잠을 아는 쪽이 침대만 아는 쪽을 늘 이긴다.
+- 밤이 남거나 바뀌면 건강 기저선의 `health.sleep`(잔 시간, 시간 단위)으로도 넣는다 - 신호와 같은 길(`signal`)로, 깬 시각에
+  밤마다 한 번(그 밤이 전에 남긴 값은 지우고). 그래서 수면 시간 숫자를 보내는 단축어가 따로 필요 없다.
+- 밤의 합계와 낮잠은 오래 두고, 단계가 언제였는지(`timeline`, 누운 때부터의 분)는 원본처럼 `CONTEXT_RAW_DAYS` 만 둔다.
+
+답(200): `{"nights":[{night, bedAt, wakeAt, asleepMinutes, result}], "unknown":[…], "skipped":n}` - result 는 `saved`(그날의
+밤이 됨) · `nap` · `kept`(이미 더 본 밤이 있음) · `short`(너무 짧음). 읽을 수 있는 잠이 하나도 없으면 400 이고 같은
+`unknown` 을 싣는다. JSON 이 아니면 400, 8MB 를 넘으면 413.
+
+`GET /sleep` 의 요약(`summary.week`, `summary.month`)은 그 기간에 기록된 밤 수, 평균 잔 분, 보통 눕는 때·일어나는 때(시계
+위의 평균 - 23:30 과 00:30 의 평균은 자정), 그리고 밤마다 그 시각에서 평균 몇 분 벗어나는지(`bedSpreadMinutes`)다.
+
+폰 설정(운영자): 단축어 → 자동화 → 특정 시간(매일 오전 10시 - 워치가 밤을 다 넘긴 뒤), 즉시 실행. 동작은 `건강 샘플 찾기`
+(수면 분석, 시작 날짜가 지난 1일 이내) → `각 항목을 반복`: `사전` {start: 시작 날짜, end: 종료 날짜, value: 값} (날짜는 매직
+변수에서 형식 ISO 8601) → `URL 내용 가져오기`: POST `https://jarvis-be.choigonyok.com/context/sleep`, 헤더
+`Authorization: Bearer <CONTEXT_SIGNAL_TOKEN>`, 본문 JSON 에 `samples` = 반복 결과. 같은 밤을 두 번 보내도 되므로 '수면 집중
+모드가 꺼질 때'를 하나 더 둬도 된다. Health Auto Export 는 REST API 자동화의 URL 을 같은 주소로, 헤더에 같은 Authorization,
+지표는 수면 분석, 형식 JSON. 주소와 토큰은 콘솔 상태 → 폰 연결의 '단축어에 넣을 값 보기'(`GET /owntracks/setup` 의 `sleep`).
 
 ## 상대(손님) 폰
 
@@ -221,8 +279,8 @@ GET /transit/lines?kind=bus|subway&region=gyeonggi|seoul&id=   그 정류장의 
 (맥 앞의 앱이 회의 앱, 15분 안), 집·회사(머무는 영역의 종류), 집중 모드. 오래된 신호는 믿지 않는다. agent 는 매
 턴 이 한 줄을 지금 상황 옆에 둔다.
 
-**건강 기저선**: 단축어가 매일 아침 `health.hrv`·`health.hr_rest`·`health.sleep`·`health.steps` 를 숫자로 보내면(`건강 샘플 찾기`
-→ URL 내용 가져오기), `/now` 의 `health` 가 마지막 값을 **내 평소**(그 전 28일, 하루 한 값의 중앙값, 7일 이상 쌓여야)와 견주고,
+**건강 기저선**: 단축어가 매일 아침 `health.hrv`·`health.hr_rest`·`health.steps` 를 숫자로 보내면(`건강 샘플 찾기`
+→ URL 내용 가져오기) - `health.sleep` 은 `POST /sleep` 의 밤이 넣는다(위 '수면') -, `/now` 의 `health` 가 마지막 값을 **내 평소**(그 전 28일, 하루 한 값의 중앙값, 7일 이상 쌓여야)와 견주고,
 15% 넘게 벗어나면 한 줄 요약에 "심박 변이(HRV) 38 (평소 45보다 16% 낮음)"처럼 넣는다. 원본은 다른 신호처럼 30일만 둔다.
 
 이 한 장이 바뀌면(보고가 올 때마다, 그리고 신호가 낡아 끝나는 것까지 1분마다 확인) `context.state` 이벤트를 낸다:
@@ -291,6 +349,15 @@ output-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   열차 빼기, 목록에도 피드에도 없는 역), 근처(세 피드 합치기, 하나가 실패해도), 역 목록(피드 이름·괄호 별칭으로 찾기,
   다음 역으로 방향, 급행·갈래·순환선 가르기). API: 사람별 경로·검사·손님 분리·피드 실패 표시·근처(me)·
   이름·노선, 시간대 안에서만 단계마다 한 번 알림(손님에게).
+- 수면(`internal/sleep`): 단축어 샘플(영어 값·ISO 시각, 한국어 값·`2026. 11. 16. 오전 7:10`)이 같은 밤(잔 433분, 누운
+  460분, 깸 27분, 단계, 타임라인 12조각)이 되고, 합한 밤(분·시간·창만·깬 분만), Health Auto Export 요약(totalSleep·
+  totalSleep 없이 asleep+단계·아이폰만의 침대)과 요약 안 함(qty 로 끝 시각, 모르는 값은 unknown), 값 이름 표, 시각 형식
+  스무여 가지, UTC 로 보낸 밤의 날(서울의 깬 날), 겹친 출처는 한 번·1시간 넘는 틈은 두 잠, 다시 보낸 밤·더 본 밤·잘린 꼬리·
+  10분 안·낮잠·첫날의 짧은 낮잠·밤보다 먼저 온 낮잠·밤에 든 낮잠·침대만 대 워치, 7일·30일 요약(자정을 넘는 시계 평균).
+  API(Postgres, 역할 `svc_context`): 신호 토큰으로만 보내고 API 토큰으로만 읽음(손님 토큰은 둘 다 401), 같은 본문 두 번에 밤
+  하나와 기저선 값 하나(`DropReadings` 를 빼면 이 테스트가 실패하는 것까지 확인), 꼬리는 kept, 낮잠과 unknown, Health Auto
+  Export 의 둘째 밤과 범위, 잘못된 범위 400, 수면이 아닌 본문 400, 타임라인 비우기 뒤에도 합계, 아흐레 밤으로 `/now` 의
+  "수면 시간 5 (평소 7보다 29% 낮음)".
 - 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration
   과 매일 되돌리는 설정 여섯 개.
   waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).
