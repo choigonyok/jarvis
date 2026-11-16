@@ -20,8 +20,10 @@ const (
 // operator: told twice (SameEvent), or close together on one day under the same
 // title, at the same place or with the same person - one outing is one thing to
 // have on the calendar. A word or a name shared with hours between, or with no
-// hour to go by, may be either way: "지수 생일" all day is not the dinner that
-// evening, and calling it so would leave the dinner off the calendar.
+// hour to go by, may be either way, and is left to a judgement: "지수 생일" all
+// day is not the dinner that evening, nor the cake pickup at 10:30 whose title
+// holds it, and calling either the same would leave it off the calendar - while
+// "치과 진료" at 15:00 may well be the "치과" told without a time.
 func Compare(a, b State) Verdict {
 	if !Overlap(a, b) {
 		return Different
@@ -55,27 +57,36 @@ func lastDay(s State) string {
 }
 
 // SameEvent is whether two plans are one event told twice - a plan heard in a
-// conversation and an entry put on the calendar another way ("은주와 합주" and
-// "기타 합주 (은주)", both 15:00 on the 17th). Same day, starts within half an
-// hour, and the titles share a word or a person. Two things at one time that
-// share nothing are a collision, which is not this.
-//
-// A plan told without a time has no time to agree on: it is the entry of
-// its day under the same title. "전날에 플랜 바꾸게 일정 추가해 줘" was read as
-// an all-day "Netflix 플랜 변경·해지" while the assistant put the same
-// title at 20:00, and the two were never tied.
+// conversation and an entry put on the calendar another way - by the rules
+// alone. Both start on one day, and what each says of when decides how much
+// the titles must agree:
+//   - A stay of days with the same first and last day is one trip when the
+//     titles meet at all ("지수와 캠핑 2박3일" and "숲속 캠핑 2박3일").
+//   - Both with a time, starting within half an hour: titles that share a word
+//     or a person ("은주와 합주" and "기타 합주 (은주)", both 15:00). At places
+//     known to be different, a shared word is not enough and the titles must
+//     name the same thing: "지수 생일 케이크 픽업" at 10:30 at 케이크가게 and "지수
+//     생일 꽃 픽업" at 11:00 at 꽃가게 are two errands, while the same dinner
+//     said at another place is one, moved. Two things at one time that share
+//     nothing are a collision, which is not this.
+//   - One with a time and one without: there is no time to agree on, so the
+//     name must be the same ("Netflix 플랜 변경·해지" all day and at 20:00). A
+//     name only held in the other's is not enough: "지수 생일" all day is the
+//     day, and "지수 생일 케이크 픽업" at 10:30 an errand on it. Compare leaves
+//     such a pair to a judgement.
+//   - Neither with a time: one title holding the other ("재택" and "재택근무").
 func SameEvent(a, b State) bool {
 	if a.Date == "" || a.Date != b.Date {
 		return false
 	}
-	// A stay of days told twice: the same first and last day is one trip,
-	// whatever each telling calls it. "지수와 캠핑 2박3일" read from a conversation
-	// and "숲속 캠핑 2박3일" put on the calendar were two.
 	if a.EndDate != "" && a.EndDate != a.Date && a.EndDate == b.EndDate && titlesMeet(a, b) {
 		return true
 	}
-	if a.Start == "" || b.Start == "" {
+	switch {
+	case a.Start == "" && b.Start == "":
 		return sameTitle(a.Title, b.Title)
+	case a.Start == "" || b.Start == "":
+		return sameName(a.Title, b.Title)
 	}
 	ta, errA := time.Parse("15:04", a.Start)
 	tb, errB := time.Parse("15:04", b.Start)
@@ -84,6 +95,9 @@ func SameEvent(a, b State) bool {
 	}
 	if d := ta.Sub(tb); d > halfHour || d < -halfHour {
 		return false
+	}
+	if placesDiffer(a, b) {
+		return sameTitle(a.Title, b.Title)
 	}
 	return titlesMeet(a, b)
 }
@@ -139,6 +153,14 @@ func clock(s State) (time.Duration, time.Duration, bool) {
 
 func samePlace(a, b State) bool {
 	return a.Place != "" && bare(a.Place) == bare(b.Place)
+}
+
+// placesDiffer is whether two plans are said to be at different places: both
+// places told, and neither name holding the other - "망원" and "망원동 모퉁이맥주"
+// may be one place, said more or less fully.
+func placesDiffer(a, b State) bool {
+	pa, pb := bare(a.Place), bare(b.Place)
+	return pa != "" && pb != "" && pa != pb && !sameTitle(pa, pb)
 }
 
 func sharePerson(a, b State) bool {
@@ -223,11 +245,23 @@ func SameHour(a, b State) bool {
 	return -halfHour <= d && d <= halfHour
 }
 
-// SameEntry is whether an entry is the one a plan would add: strictly the same
-// event, or the same day under the same title. Parts of one outing are not one
-// entry to write down.
-func SameEntry(a, b State) bool {
-	return SameEvent(a, b) || (a.Date != "" && a.Date == b.Date && sameTitle(a.Title, b.Title))
+// CompareEntry is the rule for whether an entry on the calendar is the one a
+// plan would add, asked before adding it: the same event (SameEvent) is. An
+// entry on the plan's day whose title holds the plan's, or is held in it, or is
+// the same at another hour, may be it or another thing, and is left to a
+// judgement: "치과 진료" at 15:00 may well be the "치과" told without a time, but
+// "지수 생일" all day is not the cake pickup at 10:30 on it, nor "회의" at 10:00
+// the "회의" at 15:00 - and taking either for the entry already there keeps the
+// one asked about off the calendar. Parts of one outing are not one entry to
+// write down.
+func CompareEntry(a, b State) Verdict {
+	switch {
+	case SameEvent(a, b):
+		return Same
+	case a.Date != "" && a.Date == b.Date && sameTitle(a.Title, b.Title):
+		return Unsure
+	}
+	return Different
 }
 
 // sameTitle is whether two titles name one thing: the same letters, or one
@@ -239,6 +273,13 @@ func sameTitle(a, b string) bool {
 		ra, rb = rb, ra
 	}
 	return len(ra) >= 2 && strings.Contains(string(rb), string(ra))
+}
+
+// sameName is whether two titles are one name: the same letters and digits,
+// spaces, marks and case aside. A single letter is no name.
+func sameName(a, b string) bool {
+	x := bare(a)
+	return len([]rune(x)) >= 2 && x == bare(b)
 }
 
 // bare is a title's letters and digits, lowercased.

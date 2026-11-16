@@ -62,6 +62,107 @@ func TestAMoveKeepsTheMemo(t *testing.T) {
 	}
 }
 
+// An entry already there is taken for the one a card would add when the rules
+// call it the same event. One they leave open - its title holds the card's or
+// is held in it, or is the same at another hour - is Same's to settle, and
+// without that answer it is not taken: the all-day "지수 생일" does not swallow
+// the cake pickup at 10:30 on it, nor "회의" at 10:00 the one at 15:00. Parts
+// of one outing are not asked about at all.
+func TestAnEntryAlreadyThereIsTheSameEvent(t *testing.T) {
+	ctx := context.Background()
+	cal := NewMemoryCalendar()
+	put := func(e model.CalendarEvent) model.CalendarEvent {
+		t.Helper()
+		saved, err := cal.Put(ctx, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	birthday := put(model.CalendarEvent{ID: "5d0c1e2a-7b3f-4c1d-9e8a-2f6b4a1c0d9e#2026-11-21", Title: "지수 생일", Date: "2026-11-21", Owner: "shared"})
+	put(model.CalendarEvent{Title: "회의", Date: "2026-11-17", Start: "10:00"})
+	dentist := put(model.CalendarEvent{Title: "치과 진료", Date: "2026-11-18", Start: "15:00"})
+	put(model.CalendarEvent{Title: "지수와 점심", Date: "2026-11-19", Start: "12:00"})
+	netflix := put(model.CalendarEvent{Title: "Netflix 플랜 변경·해지", Date: "2026-11-15", Start: "20:00"})
+
+	pickup := model.CalendarEvent{Title: "지수 생일 케이크 픽업", Date: "2026-11-21", Start: "10:30", Place: "케이크가게"}
+	meeting := model.CalendarEvent{Title: "회의", Date: "2026-11-17", Start: "15:00"}
+	vague := model.CalendarEvent{Title: "치과", Date: "2026-11-18"}
+	cafe := model.CalendarEvent{Title: "지수와 카페", Date: "2026-11-19", Start: "14:00"}
+	renewal := model.CalendarEvent{Title: "Netflix 플랜 변경·해지", Date: "2026-11-15"}
+
+	var asked []string
+	answering := func(same bool) CalendarActuator {
+		asked = nil
+		return CalendarActuator{Cal: cal, Same: func(_ context.Context, a, b model.State) bool {
+			asked = append(asked, a.Title+" / "+b.Title)
+			return same
+		}}
+	}
+	// already is the entry Preview links the event to, if any.
+	already := func(c CalendarActuator, e model.CalendarEvent) string {
+		t.Helper()
+		payload, _ := json.Marshal(model.CalendarAction{Event: e})
+		_, err := c.Preview(ctx, model.CalendarCreate, payload)
+		var a *Already
+		if errors.As(err, &a) {
+			return a.ID
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ""
+	}
+
+	// The rules alone.
+	rules := CalendarActuator{Cal: cal}
+	for _, c := range []struct {
+		name string
+		e    model.CalendarEvent
+		want string
+	}{
+		{"종일 생일은 그날의 픽업이 아님", pickup, ""},
+		{"다섯 시간 떨어진 같은 이름", meeting, ""},
+		{"이름을 품기만 한 항목은 판단 없이는 아님", vague, ""},
+		{"한 만남의 다른 부분", cafe, ""},
+		{"시각 없이 말한 같은 이름", renewal, netflix.ID},
+	} {
+		if got := already(rules, c.e); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// What the rules leave open is asked, and the answer stands.
+	if got := already(answering(false), pickup); got != "" || len(asked) != 1 || asked[0] != "지수 생일 케이크 픽업 / 지수 생일" {
+		t.Fatalf("생일과 픽업은 판단에 묻고, 다르다면 따로: %q %v", got, asked)
+	}
+	if got := already(answering(false), meeting); got != "" || len(asked) != 1 {
+		t.Fatalf("같은 이름의 다른 시각은 판단에 묻습니다: %q %v", got, asked)
+	}
+	if got := already(answering(true), vague); got != dentist.ID {
+		t.Fatalf("같다고 하면 이미 있는 항목에 잇습니다: %q %v", got, asked)
+	}
+	if got := already(answering(true), cafe); got != "" || len(asked) != 0 {
+		t.Fatalf("한 만남의 다른 부분은 묻지도 않습니다: %q %v", got, asked)
+	}
+	if got := already(answering(false), renewal); got != netflix.ID || len(asked) != 0 {
+		t.Fatalf("규칙이 같다고 하면 묻지 않습니다: %q %v", got, asked)
+	}
+
+	// Approved, the pickup goes on the calendar beside the birthday.
+	payload, _ := json.Marshal(model.CalendarAction{Event: pickup})
+	res, _, err := answering(false).Execute(ctx, model.CalendarCreate, payload)
+	if err != nil {
+		t.Fatalf("픽업은 새 항목입니다: %v", err)
+	}
+	if day, _ := cal.Range(ctx, "2026-11-21", "2026-11-21"); len(day) != 2 || string(res) == "" {
+		t.Fatalf("생일 옆에 픽업이 들어가야 합니다: %v %s", day, res)
+	}
+	if got, _ := cal.Get(ctx, birthday.ID); got.Title != "지수 생일" || got.Start != "" {
+		t.Fatalf("생일은 그대로: %+v", got)
+	}
+}
+
 // A move the entry already says is no question: the place in the memo, the
 // same day and hour. One that changes anything is asked.
 func TestAMoveAlreadyThereIsNotAsked(t *testing.T) {

@@ -93,7 +93,14 @@ type Calendar interface {
 }
 
 // CalendarActuator does calendar.create, .update and .delete.
-type CalendarActuator struct{ Cal Calendar }
+type CalendarActuator struct {
+	Cal Calendar
+	// Same is the one answer to whether two plans are one event (the gate's
+	// Same): it settles an entry already there that the rules leave open
+	// (existing). Without it, such an entry is not taken for the one to add.
+	// It is asked while the gate decides, so it must not wait on the gate.
+	Same func(ctx context.Context, a, b model.State) bool
+}
 
 func (CalendarActuator) Kinds() []string {
 	return []string{model.CalendarCreate, model.CalendarUpdate, model.CalendarDelete}
@@ -125,7 +132,11 @@ func entryLine(e model.CalendarEvent) string {
 	return line + " " + e.Title
 }
 
-// existing is the entry already there that the event would add (model.SameEntry).
+// existing is the entry already there that the event would add: the one the
+// rules say it is (model.CompareEntry), or else one they leave open that Same
+// says is. The calendar is read here as it is now, so this is also where an
+// entry the world model has not read yet - put there a moment ago, or further
+// ahead than the calendar is read - is found.
 func (c CalendarActuator) existing(ctx context.Context, e model.CalendarEvent) (model.CalendarEvent, bool) {
 	to := e.Date
 	if e.EndDate != "" {
@@ -136,11 +147,23 @@ func (c CalendarActuator) existing(ctx context.Context, e model.CalendarEvent) (
 		return model.CalendarEvent{}, false
 	}
 	plan := func(x model.CalendarEvent) model.State {
-		return model.State{Title: x.Title, Date: x.Date, EndDate: x.EndDate, Start: x.Start, End: x.End}
+		return model.State{Title: x.Title, Date: x.Date, EndDate: x.EndDate, Start: x.Start, End: x.End, Place: x.Place}
 	}
+	want := plan(e)
+	var open []model.CalendarEvent
 	for _, x := range evs {
-		if model.SameEntry(plan(e), plan(x)) {
+		switch model.CompareEntry(want, plan(x)) {
+		case model.Same:
 			return x, true
+		case model.Unsure:
+			open = append(open, x)
+		}
+	}
+	if c.Same != nil {
+		for _, x := range open {
+			if c.Same(ctx, want, plan(x)) {
+				return x, true
+			}
 		}
 	}
 	return model.CalendarEvent{}, false

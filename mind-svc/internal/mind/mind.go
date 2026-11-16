@@ -193,7 +193,10 @@ func New(o Options) *Mind {
 	if o.Orders == nil {
 		o.Orders = &act.MemoryOrders{}
 	}
-	actuators := []act.Actuator{act.CalendarActuator{Cal: o.Calendar}, act.Note{},
+	// Whether an entry already there is the one a card would add is the gate's
+	// one answer too, where the rules leave it open: m.Gate is set below.
+	same := func(ctx context.Context, a, b model.State) bool { return m.Gate.Same(ctx, a, b) }
+	actuators := []act.Actuator{act.CalendarActuator{Cal: o.Calendar, Same: same}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
 		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.PhotoPlaceActuator{}, act.RebalanceActuator{Orders: o.Orders},
 		// The operator's own promise, approved as a reminder: m.Moments, set

@@ -9,6 +9,10 @@ func TestSameEvent(t *testing.T) {
 	trip := func(title, from, to string) State {
 		return State{Title: title, Date: from, EndDate: to}
 	}
+	at := func(s State, place string) State {
+		s.Place = place
+		return s
+	}
 	for _, c := range []struct {
 		name string
 		a, b State
@@ -34,9 +38,24 @@ func TestSameEvent(t *testing.T) {
 		{"시각 없이 같은 제목 다른 날", plan("치과", "2026-10-17", ""), plan("치과", "2026-10-18", "15:00"), false},
 		{"한 글자는 제목이 아님", plan("회", "2026-10-17", ""), plan("회식", "2026-10-17", "19:00"), false},
 		{"짧은 영어 조각은 낱말이 아님", plan("PT at gym", "2026-10-17", "09:00"), plan("at office", "2026-10-17", "09:00"), false},
+		// One with a time, one without: the name, not a name held in another.
+		{"시각 없이 같은 이름", plan("치과", "2026-11-17", ""), plan("치과", "2026-11-17", "15:00"), true},
+		{"시각 없는 쪽 이름을 품기만 함", plan("치과", "2026-11-17", ""), plan("치과 진료", "2026-11-17", "15:00"), false},
+		{"종일 생일과 그날의 케이크 픽업", plan("지수 생일", "2026-11-21", ""), at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), false},
+		// Both with a time.
+		{"같은 이름 다섯 시간 차이", plan("회의", "2026-11-17", "10:00"), plan("회의", "2026-11-17", "15:00"), false},
+		{"다른 가게의 두 픽업", at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), at(plan("지수 생일 꽃 픽업", "2026-11-21", "11:00"), "꽃가게"), false},
+		{"다른 곳으로 옮긴 같은 저녁", at(plan("지수와 저녁", "2026-11-21", "19:00", "지수"), "망원"), at(plan("지수와 저녁", "2026-11-21", "19:00"), "합정"), true},
+		{"다른 곳이라도 제목이 같은 것을 가리킴", at(plan("저녁", "2026-11-21", "19:00"), "망원"), at(plan("지수와 저녁", "2026-11-21", "19:15"), "합정"), true},
+		{"같은 곳을 더 자세히", at(plan("은주와 저녁", "2026-11-21", "19:00", "은주"), "망원"), at(plan("저녁 (은주)", "2026-11-21", "19:00"), "망원동 모퉁이맥주"), true},
+		{"한 글자 장소도 같으면 같은 곳", at(plan("은주와 저녁", "2026-11-21", "19:00", "은주"), "집"), at(plan("저녁 (은주)", "2026-11-21", "19:00"), "집"), true},
+		{"장소를 한쪽만 앎", at(plan("은주와 합주", "2026-11-21", "15:00", "은주"), "연습실 D"), plan("기타 합주 (은주)", "2026-11-21", "15:00"), true},
 	} {
 		if got := SameEvent(c.a, c.b); got != c.want {
 			t.Errorf("%s: %v", c.name, got)
+		}
+		if got := SameEvent(c.b, c.a); got != c.want {
+			t.Errorf("%s (뒤집어서): %v", c.name, got)
 		}
 	}
 }
@@ -96,6 +115,17 @@ func TestCompare(t *testing.T) {
 		{"아무것도 안 겹침", plan("치과", "2026-11-17", "15:00"), plan("강남 회식", "2026-11-17", "15:00"), Different},
 		{"며칠 일정 안의 하루", State{Title: "제주 여행", Date: "2026-11-17", EndDate: "2026-11-19"}, plan("제주 여행 숙소 체크인", "2026-11-18", ""), Unsure},
 		{"며칠 일정 밖의 하루", State{Title: "제주 여행", Date: "2026-11-17", EndDate: "2026-11-19"}, plan("제주 여행", "2026-11-20", ""), Different},
+		// What SameEvent does not call one but something ties is for the
+		// judgement: a name held in the other's with one time between them,
+		// the same name hours apart, two errands at two shops. The same name
+		// with and without a time is one.
+		{"종일 생일과 그날의 케이크 픽업", plan("지수 생일", "2026-11-21", ""), at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), Unsure},
+		{"시각 없는 치과와 치과 진료", plan("치과", "2026-11-17", ""), plan("치과 진료", "2026-11-17", "15:00"), Unsure},
+		{"시각 없는 치과와 15시 치과", plan("치과", "2026-11-17", ""), plan("치과", "2026-11-17", "15:00"), Same},
+		{"종일과 20시의 같은 제목", plan("Netflix 플랜 변경·해지", "2026-11-15", ""), plan("Netflix 플랜 변경·해지", "2026-11-15", "20:00"), Same},
+		{"같은 이름의 회의 다섯 시간 차이", plan("회의", "2026-11-17", "10:00"), plan("회의", "2026-11-17", "15:00"), Unsure},
+		{"다른 가게의 두 픽업", at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), at(plan("지수 생일 꽃 픽업", "2026-11-21", "11:00"), "꽃가게"), Unsure},
+		{"다른 곳으로 옮긴 같은 저녁", at(plan("지수와 저녁", "2026-11-21", "19:00"), "망원"), at(plan("지수와 저녁", "2026-11-21", "19:00"), "합정"), Same},
 	} {
 		if got := Compare(c.a, c.b); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
@@ -125,15 +155,38 @@ func TestSameHour(t *testing.T) {
 	}
 }
 
-// What is already on the calendar is the same entry, not the same outing.
-func TestSameEntry(t *testing.T) {
-	lunch := State{Title: "지수와 점심", Date: "2026-11-17", Start: "12:00"}
-	cafe := State{Title: "지수와 카페", Date: "2026-11-17", Start: "14:00"}
-	if SameEntry(lunch, cafe) {
-		t.Fatal("한 만남의 앞뒤라도 항목은 따로입니다")
+// What is already on the calendar is the entry a plan would add when it is the
+// same event, not the same outing; a title held in the other's on the same
+// day, or the same at another hour, is left to the judgement.
+func TestCompareEntry(t *testing.T) {
+	plan := func(title, date, start string) State { return State{Title: title, Date: date, Start: start} }
+	at := func(s State, place string) State {
+		s.Place = place
+		return s
 	}
-	again := State{Title: "점심", Date: "2026-11-17", Start: "12:00"}
-	if !SameEntry(lunch, again) {
-		t.Fatal("같은 날 같은 제목은 같은 항목입니다")
+	for _, c := range []struct {
+		name string
+		a, b State
+		want Verdict
+	}{
+		{"한 만남의 앞뒤라도 항목은 따로", plan("지수와 점심", "2026-11-17", "12:00"), plan("지수와 카페", "2026-11-17", "14:00"), Different},
+		{"같은 때 같은 말", plan("지수와 점심", "2026-11-17", "12:00"), plan("점심", "2026-11-17", "12:00"), Same},
+		{"종일 생일과 그날의 케이크 픽업", plan("지수 생일", "2026-11-21", ""), at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), Unsure},
+		{"같은 이름의 회의 다섯 시간 차이", plan("회의", "2026-11-17", "10:00"), plan("회의", "2026-11-17", "15:00"), Unsure},
+		{"시각 없는 치과와 15시 치과", plan("치과", "2026-11-17", ""), plan("치과", "2026-11-17", "15:00"), Same},
+		{"시각 없는 치과와 치과 진료", plan("치과", "2026-11-17", ""), plan("치과 진료", "2026-11-17", "15:00"), Unsure},
+		{"종일과 20시의 같은 제목", plan("Netflix 플랜 변경·해지", "2026-11-15", ""), plan("Netflix 플랜 변경·해지", "2026-11-15", "20:00"), Same},
+		{"다른 가게의 두 픽업", at(plan("지수 생일 케이크 픽업", "2026-11-21", "10:30"), "케이크가게"), at(plan("지수 생일 꽃 픽업", "2026-11-21", "11:00"), "꽃가게"), Different},
+		{"다른 곳으로 옮긴 같은 저녁", at(plan("지수와 저녁", "2026-11-21", "19:00"), "망원"), at(plan("지수와 저녁", "2026-11-21", "19:00"), "합정"), Same},
+		{"시각 없이 한쪽이 다른 쪽을 품음", plan("재택근무", "2026-10-20", ""), plan("재택", "2026-10-20", ""), Same},
+		{"며칠 일정의 첫날·끝날이 같음", State{Title: "지수와 캠핑 2박3일", Date: "2027-01-01", EndDate: "2027-01-03"}, State{Title: "숲속 캠핑 2박3일 (4번 사이트)", Date: "2027-01-01", EndDate: "2027-01-03"}, Same},
+		{"다른 날 같은 이름", plan("치과", "2026-11-17", ""), plan("치과", "2026-11-18", "15:00"), Different},
+	} {
+		if got := CompareEntry(c.a, c.b); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+		if got := CompareEntry(c.b, c.a); got != c.want {
+			t.Errorf("%s (뒤집어서): %v, want %v", c.name, got, c.want)
+		}
 	}
 }

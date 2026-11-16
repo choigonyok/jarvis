@@ -217,6 +217,39 @@ func TestSyncCalendarTiesAPlanToldWithoutATime(t *testing.T) {
 	}
 }
 
+// An all-day entry is the day, not an errand on it whose title holds its name:
+// the yearly "지수 생일" does not take the cake pickup at 10:30 settled in a
+// conversation, which stays a plan of its own to be put on the calendar - and
+// so asks nothing about the birthday when it moves. The birthday keeps its own
+// plan.
+func TestSyncCalendarKeepsAnErrandOffTheDay(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	pickup, err := w.Create(ctx, model.KindPlan, "kakao:7", model.State{Title: "지수 생일 케이크 픽업", Status: model.Confirmed,
+		Date: "2026-11-21", Start: "10:30", Place: "케이크가게"}, Meta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	birthday := "5d0c1e2a-7b3f-4c1d-9e8a-2f6b4a1c0d9e#2026-11-21"
+	evs := []entry{{ID: birthday, Title: "지수 생일", Date: "2026-11-21", Owner: "shared"}}
+	for range 2 {
+		if err := s.SyncCalendar(ctx, evs, "2026-11-09", "2027-01-16"); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := st.Entity(ctx, pickup.ID)
+		if got.State.CalendarID != "" || got.State.Status != model.Confirmed {
+			t.Fatalf("생일 항목에 픽업이 이어지면 안 됩니다: %+v", got.State)
+		}
+		own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true)
+		if len(own) != 1 || own[0].State.CalendarID != birthday || own[0].State.Title != "지수 생일" {
+			t.Fatalf("생일은 캘린더 쪽 일정으로 남아야 합니다: %+v", own)
+		}
+	}
+}
+
 // A pair split before the fix - the entry read first as a plan of its own,
 // the conversation's plan moved onto its time after - is mended on the next
 // pass: the conversation's plan takes the entry, the calendar's copy goes.
