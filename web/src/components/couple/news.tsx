@@ -110,22 +110,31 @@ export function whereOf(n: News): string | null {
   return page;
 }
 
+/** When a piece of news was done, as a moment to compare; 0 when it says no moment. */
+const when = (at: string) => {
+  const t = Date.parse(at);
+  return Number.isNaN(t) ? 0 : t;
+};
+
+/** The moment of the newest news in a list, whichever row it is. */
+const newestOf = (list: News[]) => list.reduce((most, n) => Math.max(most, when(n.at)), 0);
+
 /**
- * The time of the newest news the operator has looked at, kept on this
- * device: what came after it is new. A browser that keeps nothing shows
- * nothing as new rather than everything.
+ * The moment of the newest news the operator has looked at, kept on this
+ * device: what came after it is new. A browser that keeps nothing, or keeps
+ * something that is no moment, shows nothing as new rather than everything.
  */
 const SEEN = "couple:news:seen";
-function seenAt(): string {
+function seenAt(): number {
   try {
-    return window.localStorage.getItem(SEEN) ?? "";
+    return when(window.localStorage.getItem(SEEN) ?? "");
   } catch {
-    return "";
+    return 0;
   }
 }
-function markSeen(at: string) {
+function markSeen(at: number) {
   try {
-    window.localStorage.setItem(SEEN, at);
+    window.localStorage.setItem(SEEN, new Date(at).toISOString());
   } catch {
     /* nowhere to keep it: the same news reads as new again */
   }
@@ -140,17 +149,17 @@ export function NewsLine({ space, map }: { space: Space | undefined; map: KoreaM
   const [before, setBefore] = useState(seen);
   const theirs = news.data?.find((n) => n.who === "partner");
   // The first time on this device nothing is new: the mark starts from now.
-  const fresh = seen ? (news.data ?? []).filter((n) => n.who === "partner" && n.at > seen).length : 0;
-  if (news.data && !seen && news.data[0]) {
-    setSeen(news.data[0].at);
-    markSeen(news.data[0].at);
+  const fresh = seen ? (news.data ?? []).filter((n) => n.who === "partner" && when(n.at) > seen).length : 0;
+  const newest = news.data ? newestOf(news.data) : 0;
+  if (!seen && newest) {
+    setSeen(newest);
+    markSeen(newest);
   }
   if (!news.data && !news.error) return <div aria-hidden className="h-11" />;
 
   function show() {
     setBefore(seen);
-    const newest = news.data?.[0]?.at;
-    if (newest && newest > seen) {
+    if (newest > seen) {
       setSeen(newest);
       markSeen(newest);
     }
@@ -212,7 +221,7 @@ function NewsPlaceholder() {
 }
 
 /** Every piece of news, forty at a time; one tapped opens what it is about. */
-function NewsList({ space, map, since, onGo }: { space: Space | undefined; map: KoreaMapData | null; since: string; onGo: () => void }) {
+function NewsList({ space, map, since, onGo }: { space: Space | undefined; map: KoreaMapData | null; since: number; onGo: () => void }) {
   const router = useRouter();
   const [limit, setLimit] = useState(PAGE);
   const news = useNews(limit);
@@ -240,7 +249,7 @@ function NewsList({ space, map, since, onGo }: { space: Space | undefined; map: 
               <span className="min-w-0 flex-1">
                 <span className="block text-ui leading-snug break-keep text-ink">
                   {sentence(n, space)}
-                  {since && n.who === "partner" && n.at > since ? (
+                  {since && n.who === "partner" && when(n.at) > since ? (
                     <span className="ml-1.5 align-middle text-meta font-medium text-partner">새 소식</span>
                   ) : null}
                 </span>

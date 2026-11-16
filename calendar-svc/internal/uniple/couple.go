@@ -725,10 +725,10 @@ func (c *Client) News(ctx context.Context, limit int) ([]News, error) {
 
 	out := make([]News, 0, len(rows))
 	for _, r := range rows {
+		// At is when it was done, the order the list is in. event_time is the
+		// time of day of the thing it is about (a calendar entry's "21:00"),
+		// not a moment: it fills the item's time where the item has none.
 		n := News{ID: r.ID, Who: side(str(r.ActorID), me), Block: str(r.BlockID), BlockType: str(r.BlockType), Kind: r.Kind, At: r.CreatedAt}
-		if r.EventTime != nil && *r.EventTime != "" {
-			n.At = *r.EventTime
-		}
 		n.BlockTitle = titles[n.Block]
 		if r.ItemID != nil {
 			n.ItemID = *r.ItemID
@@ -738,6 +738,9 @@ func (c *Client) News(ctx context.Context, limit int) ([]News, error) {
 				// Some news is about a day rather than a row: the day itself.
 				n.Item = &NewsItem{Date: *r.ItemID}
 			}
+		}
+		if n.Item != nil && n.Item.Time == "" && r.EventTime != nil && clockTime(*r.EventTime) {
+			n.Item.Time = *r.EventTime
 		}
 		out = append(out, n)
 	}
@@ -1465,6 +1468,15 @@ func day(s string) bool {
 		return false
 	}
 	_, err := time.Parse(time.DateOnly, s)
+	return err == nil
+}
+
+// clockTime is whether s is a time of day, HH:MM.
+func clockTime(s string) bool {
+	if len(s) != 5 {
+		return false
+	}
+	_, err := time.Parse("15:04", s)
 	return err == nil
 }
 

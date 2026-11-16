@@ -585,3 +585,24 @@ func TestStartDateNeedsTheSpace(t *testing.T) {
 		t.Fatal("캘린더 기념일도")
 	}
 }
+
+func TestNewsIsInTheOrderItWasDone(t *testing.T) {
+	f := &fakeREST{answers: map[string]string{
+		"GET notifications": `[
+			{"id":"n2","actor_id":"u-you","block_id":"b-cal","block_type":"calendar","kind":"update","item_id":"e1","event_time":"21:00","created_at":"2026-11-14T03:00:00.5+00:00"},
+			{"id":"n1","actor_id":"u-you","block_id":"b-cal","block_type":"calendar","kind":"","item_id":"2026-11-20","event_time":"09:30","created_at":"2026-11-13T03:00:00+00:00"}
+		]`,
+		"GET calendar_events": `[{"id":"e1","title":"저녁","start_date":"2026-11-21","start_time":null}]`,
+	}}
+	c := signedIn(t, f)
+	news, err := c.News(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(news) != 2 || news[0].At != "2026-11-14T03:00:00.5+00:00" || news[1].At != "2026-11-13T03:00:00+00:00" {
+		t.Fatalf("at 은 소식이 생긴 때: %+v", news)
+	}
+	if news[1].Item == nil || news[1].Item.Date != "2026-11-20" || news[1].Item.Time != "09:30" {
+		t.Fatalf("event_time 은 항목의 시각: %+v", news[1].Item)
+	}
+}
