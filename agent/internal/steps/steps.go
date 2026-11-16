@@ -61,6 +61,8 @@ func Line(tool string, input json.RawMessage) string {
 		return "검색: " + clamp(str(in, "query"), 80)
 	case "read":
 		return "읽기: " + clamp(str(in, "url"), 120)
+	case "shop":
+		return "쇼핑 찾기: " + clamp(str(in, "query"), 80)
 	case "WebSearch":
 		return "웹 검색: " + clamp(str(in, "query"), 80)
 	case "WebFetch":

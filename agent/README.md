@@ -46,7 +46,7 @@ mind-svc :8102        판단. 기록 → 레인 → 세계 모델 → 스킬 →
 수집기                kakaotalk-client :8090 · imessage-client :8099 (맥의 앱 DB 를 읽기만)
 tts :8106 (맥미니 호스트) 운영자·손님 각자의 목소리 복제 TTS (Qwen3-TTS 1.7B, MLX - GPU 가 필요해 compose 밖, LaunchAgent)
 browser :8931         에이전트의 Chromium (browser 네트워크에만, 결제 가드 guard.py)
-search-svc :8104      웹 찾기·읽기 - 네이버 검색, 페이지와 그림 속 글자, 네이버 지도 (search 네트워크에만)
+search-svc :8104      웹 찾기·읽기 - 네이버 검색, 페이지와 그림 속 글자, 네이버 지도, 네이버쇼핑 (search 네트워크에만)
 ocr :8107 (맥미니 호스트) 그림 속 글자 (애플 Vision - compose 밖, LaunchAgent)
 
 postgres (data 네트워크)  서비스들의 표와 기록 · falkordb (data) 기억 그래프
@@ -191,7 +191,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
   운영자가 오늘 있을 일을 아니라고 하면("오늘은 운동 안 해") `expect.deny` 로 접는다: mind 가 그 기대를 다시 말하지 않고, 준비물이면
   미리 꺼내지 않는다. 실제로 일어나면 그대로 맞은 것으로 센다(`expect.denied` 기록).
 - 카드를 거치는 쓰기는 그대로 저마다의 도구다(`create_event`, `save_login`, `save_shipping_address` 등): 게이트가 도구 이름으로
-  모듈의 카드를 찾는다. 작업(`create_job`, `instruct_job`)과 웹(`search`, `read`), `show_image` 도 그대로다. 작업 실행의 도구는 따로다.
+  모듈의 카드를 찾는다. 작업(`create_job`, `instruct_job`)과 웹(`search`, `read`, `shop`), `show_image` 도 그대로다. 작업 실행의 도구는 따로다.
 
 ### 메시지 앞에 붙는 것
 
@@ -299,20 +299,24 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 
 ### 웹 찾기
 
-- search-svc 를 부르는 모듈 `web` 이고, 도구 둘 다 읽기만 하며 카드가 없습니다: `search`(네이버 블로그·뉴스·카페·
-  지식iN·웹문서·백과·업체를 한 번에, 기간으로 거르기, 출처마다 몇 건 중 몇 건을 봤는지)와 `read`(페이지 하나 - 본문에
-  그림 속 글자가 그 자리에 들어가고, 길면 focus 로 관련 부분만, look 이면 그림 조각을 이미지로). `JARVIS_SEARCH_URL`·
+- search-svc 를 부르는 모듈 `web` 이고, 도구 셋 다 읽기만 하며 카드가 없습니다: `search`(네이버 블로그·뉴스·카페·
+  지식iN·웹문서·백과·업체를 한 번에, 기간으로 거르기, 출처마다 몇 건 중 몇 건을 봤는지), `read`(페이지 하나 - 본문에
+  그림 속 글자가 그 자리에 들어가고, 길면 focus 로 관련 부분만, look 이면 그림 조각을 이미지로), `shop`(네이버 통합검색의
+  쇼핑 결과 - 상품마다 한 줄로 이름·가격·판매처 또는 가격비교의 판매처 수·배송비·별점·링크, 광고는 `[광고]`, 네이버가
+  곁들인 추천은 `[관련]`, 몇 시 기준 가격인지와 주문하지 않았다는 말이 붙음. 정렬은 그 페이지에 나온 상품 안에서).
+  `shop` 이 돌려준 상품·판매처 주소와 사진 주소는 장부에 들어가 `read`·`show_image` 가 열 수 있습니다. `JARVIS_SEARCH_URL`·
   `JARVIS_SEARCH_TOKEN` 이 둘 다 있을 때만 켜지고, 손님 대화에도 같이 붙습니다(운영자의 것은 아무것도 열지 않습니다).
 - **read 는 본 주소만 엽니다.** 검색 결과, 읽은 페이지의 링크, 도구 결과(CLI 의 WebSearch 포함), 운영자의 메시지에 7일
   안에 나온 주소입니다. 실행기가 모델에게 보낸 글과 도구 결과를 전부 `OnSeen` 으로 넘기고, 모듈이 그 안의 주소를
   장부에 적습니다. 페이지가 모델을 꾀어 아는 것을 주소에 실어 보내게 하는 길이 막힙니다. 그래서 이 모듈이 켜지면
   CLI 의 WebFetch(아무 주소나 여는)는 내장 도구에서 빠집니다(`JARVIS_BUILTIN_TOOLS` 를 직접 정했으면 그대로).
 - 지시에는 찾기 규칙이 붙습니다: 바뀌는 사실은 기억으로 답하지 않고 찾는다, 한국 일은 `search` 먼저(해외는 WebSearch),
-  원문은 `read` 로, "인스타에서 봤대"는 출처 힌트다, 못 찾으면 다른 이름으로 다시 찾고 어디를 봤는지 밝힌다.
+  원문은 `read` 로, 상품 가격·최저가·판매처는 `shop` 먼저(언제 기준인지 밝히고 광고를 추천처럼 말하지 않는다), "인스타에서
+  봤대"는 출처 힌트다, 못 찾으면 다른 이름으로 다시 찾고 어디를 봤는지 밝힌다. 쇼핑을 언제 쓰는지는 스킬 `shop` 에 있습니다.
 - `look` 의 `nearby`(위치 모듈)는 네이버 지도(플레이스)를 먼저 묻습니다 - 영업 중인지와 마감 시각, 별점, 리뷰 수. 읽지
   못하면 OpenStreetMap 으로 찾고 그렇다고 말합니다. 좌표는 소수 셋째 자리(약 100m)로 반올림해 보냅니다.
 - 작업도 같은 도구를 받습니다(`jobs.SchedulerConfig.Web`). 찾아보기만 하는 작업은 사이트도 브라우저도 없이 대화와
-  나란히 돕니다.
+  나란히 돕니다. 최저가를 찾는 작업은 브라우저로 네이버쇼핑 검색(보안문자가 잘 뜸)을 열기 전에 `shop` 으로 찾습니다.
 
 ### 사진 보여 주기
 
@@ -383,7 +387,7 @@ scripts/mini up                               # 맥미니로 보내고 docker co
   하는 작업만 `opus` 로 돌고(`JARVIS_ENRICH_MODEL`, `JARVIS_JOBS_MODEL`, `JARVIS_JOBS_RETRY_MODEL`),
   대화가 브라우저를 쓰고 있지 않으면 바로 시작합니다. 대화가 브라우저를 쓰느라 끊긴 실행은 양보 백오프로 다시 잡힙니다.
 - **손님 대화의 도구.** Read·Write·Edit·TodoWrite·WebSearch·WebFetch·ToolSearch(웹 찾기가 켜져 있으면 WebFetch 대신 `web` 모듈의
-  search·read·look). 파일 도구는 손님이 첨부한
+  search·read·shop·look). 파일 도구는 손님이 첨부한
   사진(`/uploads`, 손님 볼륨)과 손님 자비스 기억 폴더만 닿습니다 - 그 안의 읽기는 카드 없이, 그 밖의 파일 호출은 카드 없이
   거절(`permission.Folders`, `Gate.SetRefuse`). 손님 기억이 바뀌면 알림은 손님에게 갑니다.
 - **작업은 대화와 나란히 돕니다.** 브라우저 없는 작업은 넷까지 동시에(`claudecode.MaxPlain`), 브라우저는 그 옆에 하나만.

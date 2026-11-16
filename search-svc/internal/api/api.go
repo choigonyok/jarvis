@@ -4,6 +4,7 @@
 //	POST /search   {query, sources, since, sort, limit} → hits, and what each source was asked and gave
 //	POST /read     {url, focus, offset, max, look, pictures} → the page as text, its pictures read in place
 //	POST /places   {query, lat, lng, radius, open, limit, area} → Naver Place's list around a point
+//	POST /shop     {query, sort, limit} → the products Naver's integrated search shows
 //
 // What comes back is data for a model to read: the agent words it. Nothing
 // here calls a model - what a picture means beyond its words is for the
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +35,7 @@ import (
 	"github.com/choigonyok/jarvis/search-svc/internal/naver"
 	"github.com/choigonyok/jarvis/search-svc/internal/page"
 	"github.com/choigonyok/jarvis/search-svc/internal/place"
+	"github.com/choigonyok/jarvis/search-svc/internal/shop"
 )
 
 type Server struct {
@@ -48,6 +51,7 @@ type Server struct {
 
 	mu    sync.Mutex
 	pages map[string]cachedPage
+	shops map[string]cachedShop
 }
 
 type cachedPage struct {
@@ -72,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /search", s.guard(s.search))
 	mux.HandleFunc("POST /read", s.guard(s.read))
 	mux.HandleFunc("POST /places", s.guard(s.places))
+	mux.HandleFunc("POST /shop", s.guard(s.shop))
 	return mux
 }
 
@@ -679,6 +684,100 @@ func (s *Server) places(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("장소", "source", source, "listed", len(all), "kept", len(kept), "ms", time.Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, out)
+}
+
+// --- shop -------------------------------------------------------------------
+
+type shopReq struct {
+	Query string `json:"query"`
+	// Sort is relevance (the page's order), price, price_desc or reviews:
+	// an order of the products the page shows, not of all of Naver's.
+	Sort  string `json:"sort"`
+	Limit int    `json:"limit"`
+}
+
+type cachedShop struct {
+	at       time.Time
+	products []shop.Product
+}
+
+const (
+	// shopTTL is how long one reading of the page answers again: the same
+	// search in another order, a moment later, is not worth a second fetch,
+	// and prices said as of a time stay that time's.
+	shopTTL       = 5 * time.Minute
+	maxCachedShop = 100
+	defaultShop   = 10
+	maxShop       = 40
+)
+
+func (s *Server) shop(w http.ResponseWriter, r *http.Request) {
+	var in shopReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "요청을 읽지 못했습니다")
+		return
+	}
+	query := strings.Join(strings.Fields(in.Query), " ")
+	if query == "" {
+		writeErr(w, http.StatusBadRequest, "무엇을 찾을지(query)가 없습니다")
+		return
+	}
+	by, err := shop.Order(in.Sort)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = defaultShop
+	}
+	limit = min(limit, maxShop)
+
+	start := time.Now()
+	all, at, cached := s.cachedShop(query)
+	if !cached {
+		all, err = shop.Search(r.Context(), s.Fetch, query)
+		if err != nil {
+			s.Log.Warn("쇼핑 찾기 실패", "err", err)
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		at = time.Now()
+		s.keepShop(query, all, at)
+	}
+	products := slices.Clone(all)
+	shop.Sort(products, by)
+	ads := 0
+	for _, p := range all {
+		if p.Ad {
+			ads++
+		}
+	}
+	s.Log.Info("쇼핑", "listed", len(all), "sort", by, "cached", cached, "ms", time.Since(start).Milliseconds())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query": query, "sort": by, "at": at.Format(time.RFC3339),
+		"total": len(all), "ads": ads, "source": "naver-search",
+		"products": products[:min(limit, len(products))],
+	})
+}
+
+func (s *Server) cachedShop(query string) ([]shop.Product, time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.shops[query]
+	if !ok || time.Since(c.at) > shopTTL {
+		return nil, time.Time{}, false
+	}
+	return c.products, c.at, true
+}
+
+func (s *Server) keepShop(query string, products []shop.Product, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shops == nil || len(s.shops) >= maxCachedShop {
+		s.shops = map[string]cachedShop{}
+	}
+	s.shops[query] = cachedShop{at: at, products: products}
 }
 
 // --- helpers ------------------------------------------------------------------

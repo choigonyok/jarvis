@@ -430,13 +430,14 @@ func describe(s run.Step) (string, string) {
 const noBrowserNote = "\n\n이 실행에는 브라우저가 없습니다(작업에 사이트가 없어서). 사이트를 열어야 하는 일이면 request_sites 로 그 사이트를 더하고 schedule_next 로 곧 다음 실행을 잡으세요 - 다음 실행부터 브라우저가 붙습니다. 그 밖의 일은 지금 가진 도구로 합니다.\n"
 
 // noBrowserWebNote follows noBrowserNote when the run has the web tools.
-const noBrowserWebNote = "정보를 찾고 읽기만 하는 일(검색, 페이지와 그림 속 글자 읽기)은 web 도구로 브라우저 없이 됩니다 - 그런 일에는 사이트를 더하지 마세요.\n"
+const noBrowserWebNote = "정보를 찾고 읽기만 하는 일(검색, 페이지와 그림 속 글자 읽기, 네이버쇼핑 가격 비교)은 web 도구로 브라우저 없이 됩니다 - 그런 일에는 사이트를 더하지 마세요.\n"
 
 // webRunRules go after runSystem when the run has the web tools.
 const webRunRules = `
 
 찾아보기
 - 정보를 찾을 때는 web 의 search(네이버 블로그·뉴스·카페·웹문서)와 read(원문과 그 안의 그림 속 글자)를 먼저 씁니다. 브라우저보다 빠르고 사이트를 더할 필요가 없습니다. 로그인·장바구니·주문·글쓰기처럼 사이트 안에서 해야 하는 일만 브라우저로 합니다.
+- 상품의 가격·최저가·판매처는 web 의 shop(네이버쇼핑)으로 먼저 찾습니다. 브라우저로 네이버쇼핑 검색을 열면 보안문자가 뜨기 쉽습니다. [광고] 표시와 찾은 시각을 결과에 남기고, 사려면 고른 상품의 주소를 브라우저로 엽니다.
 - read 는 검색 결과, 읽은 페이지의 링크, 작업 지시에 적힌 주소만 엽니다. 주소를 짐작해 만들지 마세요.
 - 쿠팡처럼 브라우저가 아니면 거절하는 사이트(read 가 403 을 돌려줌)의 상품·리뷰 페이지는 그 사이트가 작업의 사이트에 있으면 browser_navigate 로 엽니다. 거절당했다고 조사를 접지 마세요.
 - 가격·일정·조건은 원문(read)에서 확인하고, 어디서 확인했는지 결과에 주소를 남깁니다.`

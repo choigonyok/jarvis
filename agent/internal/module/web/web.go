@@ -1,8 +1,9 @@
 // Package web is the agent's window on search-svc: Naver's search, a page
-// read together with what its pictures say, and Naver Place near a point.
+// read together with what its pictures say, Naver Place near a point, and
+// the products Naver's search shows.
 //
-// The model gets two tools, search and read; "nearby" (module place) asks
-// Places. All of it only reads.
+// The model gets three tools, search, read and shop; "nearby" (module place)
+// asks Places. All of it only reads - shop finds products, it buys nothing.
 //
 // read opens only an address that was seen: in a search result, among a read
 // page's links, in what a tool returned (the CLI's own WebSearch too), or in
@@ -22,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,8 +42,8 @@ const (
 
 func QualifiedToolName(tool string) string { return "mcp__" + ServerName + "__" + tool }
 
-// Tools are the model's; both read.
-var Tools = []string{QualifiedToolName("search"), QualifiedToolName("read")}
+// Tools are the model's; all of them only read.
+var Tools = []string{QualifiedToolName("search"), QualifiedToolName("read"), QualifiedToolName("shop")}
 
 // --- client -----------------------------------------------------------------
 
@@ -224,6 +226,56 @@ func (c *Client) Places(ctx context.Context, q PlacesQuery) (Places, error) {
 	return out, err
 }
 
+// ShopInput is one product search: the tool's input and search-svc's request.
+type ShopInput struct {
+	Query string `json:"query" jsonschema:"상품 이름이나 종류를 낱말로(예: '에어팟 프로 2', '캠핑 의자 경량', '생수 2L'). 문장 말고."`
+	Sort  string `json:"sort,omitempty" jsonschema:"price(낮은 가격순)·price_desc(높은 가격순)·reviews(리뷰 많은 순). 비우면 네이버가 보여 준 순서(광고는 뒤로)."`
+	Limit int    `json:"limit,omitempty" jsonschema:"몇 개(기본 10, 최대 40)."`
+}
+
+type Offer struct {
+	Mall     string `json:"mall"`
+	Option   string `json:"option"`
+	Price    int    `json:"price"`
+	Shipping *int   `json:"shipping"`
+	URL      string `json:"url"`
+}
+
+type Product struct {
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Price     int     `json:"price"`
+	ListPrice int     `json:"listPrice"`
+	Mall      string  `json:"mall"`
+	Malls     int     `json:"malls"`
+	Catalog   bool    `json:"catalog"`
+	Shipping  *int    `json:"shipping"`
+	Rating    float64 `json:"rating"`
+	Reviews   int     `json:"reviews"`
+	Ad        bool    `json:"ad"`
+	Related   bool    `json:"related"`
+	Overseas  bool    `json:"overseas"`
+	Category  string  `json:"category"`
+	URL       string  `json:"url"`
+	Image     string  `json:"image"`
+	Offers    []Offer `json:"offers"`
+}
+
+type Shopping struct {
+	Query    string    `json:"query"`
+	Sort     string    `json:"sort"`
+	At       string    `json:"at"`
+	Total    int       `json:"total"`
+	Ads      int       `json:"ads"`
+	Products []Product `json:"products"`
+}
+
+func (c *Client) Shop(ctx context.Context, in ShopInput) (Shopping, error) {
+	var out Shopping
+	err := c.post(ctx, "/shop", in, &out)
+	return out, err
+}
+
 // --- what was seen ------------------------------------------------------------
 
 // Ledger is every address seen lately - the addresses read may open.
@@ -378,6 +430,14 @@ func (m *Module) Handler() http.Handler {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		return m.read(ctx, in), nil, nil
 	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "shop",
+		Description: "네이버쇼핑 상품 찾기: 네이버 통합검색에 나온 상품의 이름·가격·판매처(가격비교 상품은 최저가와 판매처 수)·배송비·별점·리뷰 수·링크를 한 번에 본다. " +
+			"가격 비교, 최저가, 어떤 상품이 있는지는 브라우저보다 이것을 먼저 쓴다. 가격은 찾은 시각에 네이버에 걸린 값이고, 광고는 [광고]로 표시된다. " +
+			"찾기만 하고 장바구니·주문·결제는 하지 않는다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ShopInput) (*mcp.CallToolResult, any, error) {
+		return m.shop(ctx, in), nil, nil
+	})
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 }
 
@@ -419,6 +479,25 @@ func (m *Module) read(ctx context.Context, in ReadInput) *mcp.CallToolResult {
 			&mcp.ImageContent{Data: l.JPEG, MIMEType: "image/jpeg"})
 	}
 	return &mcp.CallToolResult{Content: content}
+}
+
+func (m *Module) shop(ctx context.Context, in ShopInput) *mcp.CallToolResult {
+	if strings.TrimSpace(in.Query) == "" {
+		return fail(errors.New("무엇을 찾을지(query)가 없습니다"))
+	}
+	res, err := m.client.Shop(ctx, in)
+	if err != nil {
+		return fail(err)
+	}
+	// The products' pages and pictures, for read and show_image.
+	for _, p := range res.Products {
+		m.seen.add(p.URL)
+		m.seen.add(p.Image)
+		for _, o := range p.Offers {
+			m.seen.add(o.URL)
+		}
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderShop(in, res, time.Now())}}}
 }
 
 func fail(err error) *mcp.CallToolResult {
@@ -576,6 +655,129 @@ func renderPage(in ReadInput, p Page) string {
 	}
 	return b.String()
 }
+
+var shopOrders = map[string]string{
+	"relevance": "네이버가 보여 준 순서(광고는 뒤로)", "price": "낮은 가격순", "price_desc": "높은 가격순", "reviews": "리뷰 많은 순",
+}
+
+// maxShopPictures is how many products' photo addresses a shop answer lists.
+const maxShopPictures = 4
+
+// renderShop is a product search as lines: name · price · seller · delivery
+// · stars · link, with what the prices and marks mean said once below.
+func renderShop(in ShopInput, res Shopping, now time.Time) string {
+	var b strings.Builder
+	at := now
+	if t, err := time.Parse(time.RFC3339, res.At); err == nil {
+		at = t
+	}
+	when := day(at, now) + " " + at.In(time.Local).Format("15:04")
+	order := firstOf(shopOrders[res.Sort], res.Sort)
+	fmt.Fprintf(&b, "네이버쇼핑 '%s' · %s · %s 기준 · 상품 %d개 중 %d개", firstOf(res.Query, in.Query), order, when, res.Total, len(res.Products))
+	if res.Ads > 0 {
+		fmt.Fprintf(&b, "(광고 %d개 포함)", res.Ads)
+	}
+	b.WriteString("\n")
+	if len(res.Products) == 0 {
+		b.WriteString("찾은 상품이 없습니다.\n")
+	}
+	var catalogs, ads, related bool
+	for i, p := range res.Products {
+		var parts []string
+		name := p.Title
+		switch {
+		case p.Ad:
+			name, ads = "[광고] "+name, true
+		case p.Related:
+			name, related = "[관련] "+name, true
+		}
+		parts = append(parts, name)
+		switch {
+		case p.Price <= 0:
+			parts = append(parts, "가격 없음")
+		case p.Catalog:
+			catalogs = true
+			parts = append(parts, "최저 "+won(p.Price))
+		case p.ListPrice > p.Price:
+			parts = append(parts, fmt.Sprintf("%s(할인 전 %s)", won(p.Price), won(p.ListPrice)))
+		default:
+			parts = append(parts, won(p.Price))
+		}
+		switch {
+		case p.Catalog && p.Malls > 0:
+			parts = append(parts, fmt.Sprintf("판매처 %s곳", comma(p.Malls)))
+		case p.Mall != "":
+			parts = append(parts, p.Mall)
+		}
+		if s := shipping(p.Shipping); s != "" {
+			parts = append(parts, s)
+		}
+		if p.Overseas {
+			parts = append(parts, "해외")
+		}
+		switch {
+		case p.Rating > 0:
+			parts = append(parts, fmt.Sprintf("별점 %s(리뷰 %s)", strconv.FormatFloat(p.Rating, 'f', -1, 64), comma(p.Reviews)))
+		case p.Reviews > 0:
+			parts = append(parts, "리뷰 "+comma(p.Reviews))
+		}
+		if p.Category != "" {
+			parts = append(parts, p.Category)
+		}
+		if p.URL != "" {
+			parts = append(parts, p.URL)
+		}
+		fmt.Fprintf(&b, "[%d] %s\n", i+1, strings.Join(parts, " · "))
+		for _, o := range p.Offers {
+			offer := []string{strings.TrimSpace(o.Option + " " + o.Mall), won(o.Price)}
+			if s := shipping(o.Shipping); s != "" {
+				offer = append(offer, s)
+			}
+			if o.URL != "" {
+				offer = append(offer, o.URL)
+			}
+			fmt.Fprintf(&b, "    판매처: %s\n", strings.Join(offer, " · "))
+		}
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "가격은 %s에 네이버에 걸린 값입니다. 쿠폰·카드 할인·옵션에 따라 실제 결제 금액은 다를 수 있습니다.\n", when)
+	if catalogs {
+		b.WriteString("'최저 …원 · 판매처 n곳'은 네이버 가격비교로 묶인 한 모델을 파는 곳 중 가장 싼 값입니다.\n")
+	}
+	if ads {
+		b.WriteString("[광고]는 네이버가 광고로 표시한 상품입니다.\n")
+	}
+	if related {
+		b.WriteString("[관련]은 검색 결과가 아니라 네이버가 곁들인 다른 상품입니다.\n")
+	}
+	if res.Sort != "" && res.Sort != "relevance" {
+		fmt.Fprintf(&b, "정렬은 네이버 통합검색 첫 화면의 상품 %d개 안에서 한 것입니다 - 네이버쇼핑 전체의 순서가 아닙니다.\n", res.Total)
+	}
+	b.WriteString("찾기만 했습니다 - 장바구니·주문·결제는 하지 않았습니다.\n")
+	var pics []string
+	for i, p := range res.Products {
+		if strings.HasPrefix(p.Image, "https://") && len(pics) < maxShopPictures {
+			pics = append(pics, fmt.Sprintf("- [%d] %s", i+1, p.Image))
+		}
+	}
+	if len(pics) > 0 {
+		b.WriteString("\n사진 주소(show_image 로 띄울 수 있음):\n" + strings.Join(pics, "\n") + "\n")
+	}
+	return b.String()
+}
+
+// shipping is a delivery fee as the page says it; "" when it says nothing.
+func shipping(fee *int) string {
+	switch {
+	case fee == nil:
+		return ""
+	case *fee == 0:
+		return "무료배송"
+	}
+	return "배송비 " + won(*fee)
+}
+
+func won(n int) string { return comma(n) + "원" }
 
 // day is a date as the operator says it: 10/25 this year, 2025-10-25 before.
 func day(t time.Time, now time.Time) string {

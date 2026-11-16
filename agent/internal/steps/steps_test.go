@@ -16,6 +16,7 @@ func TestLine(t *testing.T) {
 		{"mcp__job__schedule_next", `{}`, ""},
 		{"mcp__job__progress", `{"text":"글을 올립니다"}`, ""},
 		{"mcp__web__search", `{"query":"양평 캠핑장 장작"}`, "검색: 양평 캠핑장 장작"},
+		{"mcp__web__shop", `{"query":"캠핑 의자","sort":"price"}`, "쇼핑 찾기: 캠핑 의자"},
 
 		// The conversation's boards: what is looked at, and what is left.
 		{"mcp__look__look", `{"what":"calendar","args":{"from":"2026-11-07"}}`, "일정 보기"},

@@ -5,7 +5,8 @@
 // It replaced developers.naver.com's open API: another host
 // (naverapihub.apigw.ntruss.com) and other headers (X-NCP-APIGW-API-KEY-ID
 // and -KEY, an HUB application's Client ID and Secret). Shopping, books and
-// specialist documents were not carried over. One key, about 775,000 calls a
+// specialist documents were not carried over - products are read from the
+// integrated search page instead (package shop). One key, about 775,000 calls a
 // month across the search categories, 50 a second.
 package naver
 

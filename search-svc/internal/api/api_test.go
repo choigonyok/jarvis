@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/choigonyok/jarvis/search-svc/internal/imgtext"
 	"github.com/choigonyok/jarvis/search-svc/internal/naver"
 	"github.com/choigonyok/jarvis/search-svc/internal/place"
+	"github.com/choigonyok/jarvis/search-svc/internal/shop"
 )
 
 func newServer(t *testing.T, naverBase, ocrURL string) *Server {
@@ -212,5 +214,60 @@ func TestPlacesKeepsWhatIsNearAndOpen(t *testing.T) {
 	}
 	if code, _ := post(t, newServer(t, "", "").Handler(), "/places", "tok", map[string]any{"query": "술집"}); code != http.StatusBadRequest {
 		t.Errorf("no point: %d", code)
+	}
+}
+
+func TestShopListsSortsAndCutsThePagesProducts(t *testing.T) {
+	fixture, err := os.ReadFile("../shop/testdata/list.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched := 0
+	naverPage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched++
+		if r.URL.Query().Get("query") == "서울 날씨" {
+			w.Write([]byte(`<html><title>서울 날씨 : 네이버 검색</title></html>`))
+			return
+		}
+		w.Write(fixture)
+	}))
+	defer naverPage.Close()
+	old := shop.SearchURL
+	shop.SearchURL = naverPage.URL
+	defer func() { shop.SearchURL = old }()
+	h := newServer(t, "", "").Handler()
+
+	code, out := post(t, h, "/shop", "tok", map[string]any{"query": "  캠핑   의자 ", "limit": 3})
+	if code != http.StatusOK {
+		t.Fatalf("%d %v", code, out)
+	}
+	products := out["products"].([]any)
+	if len(products) != 3 || out["total"].(float64) != 7 || out["ads"].(float64) != 3 || out["sort"] != "relevance" ||
+		out["query"] != "캠핑 의자" || out["at"] == nil {
+		t.Errorf("out = %v", out)
+	}
+	if first := products[0].(map[string]any); first["title"] != "다라 경량 캠핑 의자 1+1 & 수납 가방" || first["price"].(float64) != 19900 {
+		t.Errorf("first = %v", first)
+	}
+
+	// Another order of the same search is the same reading of the page.
+	_, out = post(t, h, "/shop", "tok", map[string]any{"query": "캠핑 의자", "sort": "price"})
+	products = out["products"].([]any)
+	if fetched != 1 || len(products) != 7 || products[0].(map[string]any)["price"].(float64) != 15000 ||
+		products[0].(map[string]any)["ad"] != true {
+		t.Errorf("fetched %d, by price: %v", fetched, products)
+	}
+
+	if code, _ := post(t, h, "/shop", "tok", map[string]any{"query": " "}); code != http.StatusBadRequest {
+		t.Errorf("no query: %d", code)
+	}
+	if code, _ := post(t, h, "/shop", "tok", map[string]any{"query": "의자", "sort": "cheapest"}); code != http.StatusBadRequest {
+		t.Errorf("unknown sort: %d", code)
+	}
+	if code, out := post(t, h, "/shop", "tok", map[string]any{"query": "서울 날씨"}); code != http.StatusBadGateway || !strings.Contains(out["error"].(string), "쇼핑 결과가 없습니다") {
+		t.Errorf("no shopping section: %d %v", code, out)
+	}
+	if code, _ := post(t, h, "/shop", "wrong", map[string]any{"query": "의자"}); code != http.StatusUnauthorized {
+		t.Errorf("wrong token: %d", code)
 	}
 }

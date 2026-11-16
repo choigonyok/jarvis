@@ -16,7 +16,7 @@ func TestSearchRulesOnlyWithSearch(t *testing.T) {
 		t.Fatalf("검색 서비스가 없을 때의 지시가 바뀌었습니다:\n%s", off)
 	}
 	on := (&Runner{cfg: config.Config{SystemPrompt: "base", MindURL: "http://mind", SearchURL: "http://search", SearchToken: "s"}}).systemPrompt()
-	for _, want := range []string{"mcp__web__search", "mcp__web__read", "인스타에서 봤대", "네이버 지도", "open 을 켜세요"} {
+	for _, want := range []string{"mcp__web__search", "mcp__web__read", "mcp__web__shop", "인스타에서 봤대", "네이버 지도", "open 을 켜세요"} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("지시에 %q 가 없습니다:\n%s", want, on)
 		}
@@ -25,7 +25,7 @@ func TestSearchRulesOnlyWithSearch(t *testing.T) {
 		t.Fatalf("OpenStreetMap 안내가 남았습니다:\n%s", on)
 	}
 	guest := (&Runner{cfg: config.Config{SystemPrompt: "guest", Guest: true, SearchURL: "http://search", SearchToken: "s"}}).systemPrompt()
-	if !strings.Contains(guest, "mcp__web__search") || strings.Contains(guest, "find_nearby") {
+	if !strings.Contains(guest, "mcp__web__search") || !strings.Contains(guest, "mcp__web__shop") || strings.Contains(guest, "find_nearby") {
 		t.Fatalf("손님 지시:\n%s", guest)
 	}
 }
