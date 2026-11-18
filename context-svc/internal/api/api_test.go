@@ -955,3 +955,86 @@ func TestGuestRegions(t *testing.T) {
 		t.Fatalf("지운 영역: %d %s", code, body)
 	}
 }
+
+// A phone named in owntracks.paused is answered as if its report were kept,
+// and nothing of it is: no raw report, no last location. Taken off the list,
+// the next report is kept again.
+func TestPausedPhones(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw", Public: "https://gw.example/context"}, nil, quiet).Handler())
+	defer srv.Close()
+	post := func(user, pass, body string) (int, string) {
+		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(body))
+		req.SetBasicAuth(user, pass)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	kept := func() int {
+		conn, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(ctx)
+		var n int
+		if err := conn.QueryRow(ctx, `select count(*) from context_raw`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	fix := `{"_type":"location","lat":37.5665,"lon":126.978,"acc":10,"tst":1760500000,"batt":80}`
+
+	if err := st.Set(ctx, pausedKey, []string{ownerPhone, guestPhone}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range [][2]string{{"phone", "pw"}, {"guest-phone", "gpw"}} {
+		if code, body := post(p[0], p[1], fix); code != 200 || body != "[]\n" && body != "[]" {
+			t.Fatalf("멈춘 폰 %s: %d %q", p[0], code, body)
+		}
+		if code, _ := post(p[0], p[1], `{"_type":"transition","event":"leave","desc":"집","tst":1760500100}`); code != 200 {
+			t.Fatalf("멈춘 폰의 전환 %s: %d", p[0], code)
+		}
+	}
+	if code, _ := post("phone", "nope", fix); code != 401 {
+		t.Fatalf("멈춘 동안에도 틀린 비밀번호는 401: %d", code)
+	}
+	if n := kept(); n != 0 {
+		t.Fatalf("멈춘 동안 남은 원본 %d건", n)
+	}
+	var loc Location
+	if _, err := st.Get(ctx, "location", &loc); err != store.ErrNotFound {
+		t.Fatalf("멈춘 동안 마지막 위치가 바뀜: %v %+v", err, loc)
+	}
+
+	// Only the guest's phone paused: the operator's is kept.
+	if err := st.Set(ctx, pausedKey, []string{guestPhone}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := post("phone", "pw", fix); code != 200 {
+		t.Fatalf("다시 받는 폰: %d %s", code, body)
+	}
+	if code, _ := post("guest-phone", "gpw", fix); code != 200 {
+		t.Fatalf("아직 멈춘 상대 폰: %d", code)
+	}
+	if n := kept(); n != 1 {
+		t.Fatalf("운영자 폰만 남아야 함: %d건", n)
+	}
+	if _, err := st.Get(ctx, "location", &loc); err != nil || loc.Lat != 37.5665 {
+		t.Fatalf("다시 받은 위치: %v %+v", err, loc)
+	}
+}

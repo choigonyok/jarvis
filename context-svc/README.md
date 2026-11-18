@@ -206,6 +206,18 @@ mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 �
 상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환, 상대 영역 안도 자리 잡은 것.
 자기 영역을 나서는 전환 메시지에도 바로 Move) - 손으로 거는 모드만 없다.
 
+## 위치 수집 멈추기
+
+`context_state` 의 `owntracks.paused` 에 폰 이름(`owntracks` 운영자, `owntracks-guest` 상대)을 넣으면 그 폰의
+`POST /owntracks` 는 인증만 확인하고 `200 []` 로 답한 뒤 아무것도 남기지 않는다 - 원본, 마지막 위치, 체류, 영역, 모드
+판단, 매일 되돌리는 것 모두. 폰은 보낸 것으로 여겨 다시 보내지 않으므로 다시 받기 시작해도 그 사이 위치는 없다. 매
+보고마다 읽어서 재시작 없이 바로 적용된다.
+
+```
+scripts/mini psql "insert into context_state (key, value, at) values ('owntracks.paused', '[\"owntracks\",\"owntracks-guest\"]', now()) on conflict (key) do update set value = excluded.value, at = excluded.at"
+scripts/mini psql "delete from context_state where key = 'owntracks.paused'"     # 다시 받기
+```
+
 ## 출발 (실시간 버스·지하철)
 
 콘솔 출발 탭의 것(`internal/api/transit.go`, `internal/transit`). 사람마다(운영자 `transit.routes`, 손님

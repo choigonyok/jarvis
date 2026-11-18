@@ -10,7 +10,10 @@
 //	                         fixes and its regions are kept apart and move none
 //	                         of the operator's visits, state, regions or
 //	                         events; its arrivals go to the guest's own inbox.
-//	POST   /signals          {source, kind, state, at?} iOS Shortcuts, the Mac
+//	                         A phone named in owntracks.paused (context_state,
+//	                         set by hand) is answered [] and nothing of its
+//	                         report is kept.
+//	POST   /signals         {source, kind, state, at?} iOS Shortcuts, the Mac
 //	                         collector, Home Assistant (bearer: the signal token)
 //	POST   /sleep            what the phone's health store says of sleep - a
 //	                         shortcut's samples, a night summed, or Health Auto
@@ -262,6 +265,16 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 		return
 	}
+	if paused, err := s.paused(r.Context(), source); err != nil {
+		s.fail(w, "위치 수집 설정을 읽지 못했습니다", err)
+		return
+	} else if paused {
+		// Answered as a kept report is, with nothing to do: the phone neither
+		// sends it again nor shows an error.
+		_, _ = io.Copy(io.Discard, http.MaxBytesReader(w, r.Body, 64<<10))
+		writeJSON(w, http.StatusOK, []map[string]any{})
+		return
+	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
@@ -299,6 +312,21 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Check(ctx)
 	writeJSON(w, http.StatusOK, cmds)
+}
+
+// pausedKey names the phones (ownerPhone, guestPhone) whose reports are let
+// go. It is set and cleared by hand - README '위치 수집 멈추기'.
+const pausedKey = "owntracks.paused"
+
+func (s *Server) paused(ctx context.Context, phone string) (bool, error) {
+	var phones []string
+	if _, err := s.st.Get(ctx, pausedKey, &phones); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return slices.Contains(phones, phone), nil
 }
 
 // ingest moves visits and the state by one report and says what the phone
