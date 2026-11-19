@@ -18,8 +18,8 @@
     {
       "binding": "DB",
       "database_name": "dungji",
-      // 배포 전에 `wrangler d1 create dungji` 로 받은 id 로 바꾼다(DEPLOY.md '둥지').
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // APAC, 11/20 `wrangler d1 create dungji`
+      "database_id": "901c6146-f155-47a6-8fd8-f52254c73335",
       "migrations_dir": "migrations"
     }
   ],

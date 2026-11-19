@@ -80,4 +80,9 @@ JARVIS=http://localhost:3301 node --experimental-sqlite e2e/jarvis.mjs
 
 ## 배포
 
-아직 배포하지 않았어요. 순서는 jarvis 의 [DEPLOY.md](../DEPLOY.md) '둥지'에 있어요. D1 을 만들고, 표를 올리고, 두 Worker 에 같은 비밀을 넣고, 둥지를 배포한 뒤 콘솔을 배포해요.
+`dungji.choigonyok.com` 에서 돌고 있어요. D1 은 `dungji`(APAC, id 는 wrangler.jsonc)이고, 두 Worker 가 나눠 가진 입장권 비밀은 Worker 비밀에만 있어요. 바꾸려면 새 값을 두 Worker 에 함께 넣어요. 처음 올린 순서와 다시 올리는 법은 jarvis 의 [DEPLOY.md](../DEPLOY.md) '둥지'에 있어요.
+
+```sh
+npm run db:remote   # 표가 바뀌었을 때만, 배포보다 먼저
+npm run deploy      # vite build → wrangler deploy
+```

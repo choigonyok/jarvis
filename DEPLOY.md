@@ -196,11 +196,11 @@ memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔
 두 Worker 가 나눠 가진 비밀 하나로 서명하고 확인한다(콘솔 `DUNGJI_SSO_SECRET` = 둥지
 `JARVIS_SSO_SECRET`). 두 주소가 `choigonyok.com` 아래라서 프레임 안의 둥지 로그인 쿠키가 남는다.
 
-처음 한 번:
+처음 한 번(이미 했다 - D1 `dungji` 는 APAC, id 는 dungji/wrangler.jsonc):
 
 ```sh
 cd dungji && npm ci
-npx wrangler d1 create dungji              # 받은 id 를 dungji/wrangler.jsonc 의 database_id 에
+npx wrangler d1 create dungji --location apac   # 받은 id 를 dungji/wrangler.jsonc 의 database_id 에
 npx wrangler d1 migrations apply dungji --remote
 SECRET=$(openssl rand -hex 32)
 printf %s "$SECRET" | npx wrangler secret put JARVIS_SSO_SECRET
