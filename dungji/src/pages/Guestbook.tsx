@@ -60,11 +60,11 @@ export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; m
 
   return (
     <div>
-      <h2 className="mb-2 text-[17px] font-bold">{home.owner ? "우리 방명록" : `${home.name} 방명록`}</h2>
+      <h2 className="mb-2 text-title font-semibold">{home.owner ? "우리 방명록" : `${home.name} 방명록`}</h2>
       {!home.owner && (
-        <form onSubmit={write} className="mb-3 rounded-2xl bg-card p-3">
+        <form onSubmit={write} className="mb-3 rounded-xl bg-glass p-3">
           <textarea
-            className="field hand min-h-[96px] text-[20px] leading-snug"
+            className="field  min-h-[96px] text-read leading-snug"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             maxLength={300}
@@ -72,22 +72,22 @@ export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; m
             aria-label="방명록에 남길 말"
           />
           <div className="mt-2 flex items-center gap-3">
-            <label className="flex h-11 cursor-pointer items-center gap-2 text-[14px]">
-              <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} className="size-5 accent-[var(--egg-deep)]" />
-              <Icon name="lock" className="size-4 text-muted" />
+            <label className="flex h-11 cursor-pointer items-center gap-2 text-ui">
+              <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} className="size-5 accent-[var(--foreground)]" />
+              <Icon name="lock" className="size-4 text-dim" />
               둥지 주인만 보기
             </label>
             <span className="flex-1" />
-            <button className="btn btn-primary h-11 min-h-0" disabled={busy || !body.trim()}>
+            <button className="btn btn-approve h-11 min-h-0" disabled={busy || !body.trim()}>
               남기기
             </button>
           </div>
         </form>
       )}
       {entries === null ? (
-        <div className="h-24 rounded-2xl bg-card" aria-busy="true" />
+        <div className="h-24 rounded-xl bg-glass" aria-busy="true" />
       ) : entries.length === 0 ? (
-        <p className="rounded-2xl bg-card px-4 py-4 text-[15px] text-muted">{home.owner ? "아직 방명록이 비어 있어요. 이웃에 먼저 놀러 가 보세요." : "첫 한마디를 남겨 주세요."}</p>
+        <p className="rounded-xl bg-glass px-4 py-4 text-body text-dim">{home.owner ? "아직 방명록이 비어 있어요. 이웃에 먼저 놀러 가 보세요." : "첫 한마디를 남겨 주세요."}</p>
       ) : (
         <ul className="space-y-2.5">
           {shown!.map((g) => (
@@ -96,12 +96,12 @@ export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; m
         </ul>
       )}
       {!compact && more && (
-        <button type="button" className="btn btn-quiet mt-3 w-full" onClick={older}>
+        <button type="button" className="btn btn-raised mt-3 w-full" onClick={older}>
           지난 방명록 더 보기
         </button>
       )}
       {compact && (entries?.length ?? 0) > 3 && (
-        <a className="btn btn-quiet mt-3 w-full" {...linkTo(`/h/${home.slug}?tab=guestbook`)}>
+        <a className="btn btn-raised mt-3 w-full" {...linkTo(`/h/${home.slug}?tab=guestbook`)}>
           방명록 모두 보기
         </a>
       )}
@@ -136,41 +136,41 @@ function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; m
   }
 
   return (
-    <li className="rounded-2xl bg-card p-4">
-      <div className="flex items-center gap-2 text-[14px]">
-        <a className="min-w-0 truncate font-bold underline-offset-2 hover:underline" {...linkTo(`/h/${g.slug}`)}>
+    <li className="rounded-xl bg-glass p-4">
+      <div className="flex items-center gap-2 text-ui">
+        <a className="min-w-0 truncate font-semibold underline-offset-2 hover:underline" {...linkTo(`/h/${g.slug}`)}>
           {g.author}
-          <span className="font-normal text-muted"> {g.home}</span>
+          <span className="font-normal text-dim"> {g.home}</span>
         </a>
-        {g.secret && <Icon name="lock" className="size-3.5 shrink-0 text-muted" title="비밀글" />}
-        <span className="ml-auto shrink-0 text-[12px] text-muted">{ago(g.at)}</span>
+        {g.secret && <Icon name="lock" className="size-3.5 shrink-0 text-dim" title="비밀글" />}
+        <span className="ml-auto shrink-0 text-meta text-dim">{ago(g.at)}</span>
       </div>
       {g.hidden ? (
-        <p className="mt-1.5 text-[15px] text-muted">둥지 주인만 볼 수 있는 글이에요.</p>
+        <p className="mt-1.5 text-body text-dim">둥지 주인만 볼 수 있는 글이에요.</p>
       ) : (
-        <p className="hand mt-1.5 text-[21px] leading-snug break-words whitespace-pre-wrap">{g.body}</p>
+        <p className=" mt-1.5 text-read leading-snug break-words whitespace-pre-wrap">{g.body}</p>
       )}
       {g.reply && !replying && (
-        <div className="mt-2 flex gap-2 rounded-xl bg-well px-3 py-2">
-          <Icon name="reply" className="mt-0.5 size-4 shrink-0 text-egg-deep" />
-          <p className="hand text-[19px] leading-snug break-words">{g.reply}</p>
+        <div className="mt-2 flex gap-2 rounded-xl bg-glass px-3 py-2">
+          <Icon name="reply" className="mt-0.5 size-4 shrink-0 text-foreground" />
+          <p className=" text-read leading-snug break-words">{g.reply}</p>
         </div>
       )}
       {replying && (
         <form onSubmit={sendReply} className="mt-2 flex gap-2">
           <input className="field h-11 min-h-0" value={reply} onChange={(e) => setReply(e.target.value)} maxLength={300} autoFocus aria-label="답글" placeholder="답글 (비우면 지워요)" />
-          <button className="btn btn-primary h-11 min-h-0 shrink-0 px-4">달기</button>
+          <button className="btn btn-approve h-11 min-h-0 shrink-0 px-4">달기</button>
         </form>
       )}
       {(owner || g.canDelete) && !replying && (
         <div className="mt-2 flex justify-end gap-1">
           {owner && !g.hidden && (
-            <button type="button" className="h-9 rounded-lg px-2.5 text-[14px] text-muted" onClick={() => setReplying(true)}>
+            <button type="button" className="h-9 rounded-lg px-2.5 text-ui text-dim" onClick={() => setReplying(true)}>
               {g.reply ? "답글 고치기" : "답글"}
             </button>
           )}
           {g.canDelete && (
-            <button type="button" className="h-9 rounded-lg px-2.5 text-[14px] text-danger" onClick={remove}>
+            <button type="button" className="h-9 rounded-lg px-2.5 text-ui text-reject" onClick={remove}>
               {g.authorId === meId ? "내 글 지우기" : "지우기"}
             </button>
           )}

@@ -22,7 +22,7 @@ const SHOP_TABS: [ShopTab, string][] = [
 ];
 
 function Price({ n, coins }: { n: number; coins: number }) {
-  return <Feathers n={n} className={`text-[14px] font-bold ${coins < n ? "text-muted" : ""}`} />;
+  return <Feathers n={n} className={`text-ui font-semibold ${coins < n ? "text-dim" : ""}`} />;
 }
 
 // ── 상점 ─────────────────────────────────────────────────────────
@@ -43,27 +43,27 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
       onClose={onClose}
       title={
         <span className="flex items-center gap-3">
-          상점 <Feathers n={coins} className="text-[16px] font-bold" />
+          상점 <Feathers n={coins} className="text-field font-semibold" />
         </span>
       }
     >
       <div className="-mx-5 mb-3 flex gap-1.5 overflow-x-auto px-5 pb-1" role="tablist" aria-label="상점 칸">
         {SHOP_TABS.map(([t, name]) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`h-10 shrink-0 rounded-full px-4 text-[14px] font-bold ${tab === t ? "bg-ink text-paper" : "bg-well text-ink"}`}>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`focus-ring h-9 shrink-0 rounded-full border px-3.5 text-ui ${tab === t ? "border-edge bg-glass-raised font-medium text-foreground" : "border-transparent text-dim hover:text-foreground"}`}>
             {name}
           </button>
         ))}
       </div>
 
       {tab !== "fish" && tab !== "theme" && (
-        <p className="mb-3 text-[13px] text-muted">{full ? "창고가 꽉 차서 산 물건은 방의 빈자리에 바로 놓여요." : "산 물건은 창고에 들어가요. 창고에서 꺼내 방에 두세요."}</p>
+        <p className="mb-3 text-aside text-dim">{full ? "창고가 꽉 차서 산 물건은 방의 빈자리에 바로 놓여요." : "산 물건은 창고에 들어가요. 창고에서 꺼내 방에 두세요."}</p>
       )}
 
       {tab === "fish" ? (
         tanks.length === 0 ? (
-          <div className="rounded-2xl bg-well p-4 text-[15px]">
+          <div className="rounded-xl bg-glass p-4 text-body">
             물고기는 방에 놓인 어항에서 살아요.
-            <button type="button" className="btn btn-primary mt-3 w-full" onClick={() => setTab("tank")}>
+            <button type="button" className="btn btn-approve mt-3 w-full" onClick={() => setTab("tank")}>
               어항 보러 가기
             </button>
           </div>
@@ -72,7 +72,7 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
             {tanks.length > 1 && (
               <div className="mb-3 flex gap-2">
                 {tanks.map((t) => (
-                  <button key={t.id} type="button" onClick={() => setTank(t.id)} className={`h-10 rounded-full px-3 text-[14px] ${tank === t.id ? "bg-egg/40 font-bold" : "bg-well"}`}>
+                  <button key={t.id} type="button" onClick={() => setTank(t.id)} className={`h-10 rounded-full px-3 text-ui ${tank === t.id ? "bg-glass-raised font-semibold" : "bg-glass"}`}>
                     {itemDef(t.key)?.name} {t.tank!.fish.length}/{t.tank!.capacity}
                   </button>
                 ))}
@@ -83,11 +83,11 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
                 const target = tanks.find((t) => t.id === tank) ?? tanks[0];
                 const roomy = target.tank!.fish.length < target.tank!.capacity;
                 return (
-                  <li key={f.key} className="flex flex-col items-center rounded-2xl bg-well p-3 text-center">
+                  <li key={f.key} className="flex flex-col items-center rounded-xl bg-glass p-3 text-center">
                     <FishThumb species={f.key} className="h-12 w-20" />
-                    <p className="mt-1 text-[15px] font-bold">{f.name}</p>
+                    <p className="mt-1 text-body font-semibold">{f.name}</p>
                     <Price n={f.price} coins={coins} />
-                    <button type="button" disabled={coins < f.price || !roomy} onClick={() => void actions.act("/shop/fish", { species: f.key, tankId: target.id })} className="btn btn-primary mt-2 h-10 min-h-0 w-full text-[14px]">
+                    <button type="button" disabled={coins < f.price || !roomy} onClick={() => void actions.act("/shop/fish", { species: f.key, tankId: target.id })} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
                       {!roomy ? "어항이 꽉 찼어요" : coins < f.price ? "깃털이 모자라요" : "들이기"}
                     </button>
                   </li>
@@ -102,12 +102,12 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
             const owned = home.themes?.includes(t.key);
             const using = home.wallpaper === t.key || home.floor === t.key;
             return (
-              <li key={t.key} className="flex flex-col items-center rounded-2xl bg-well p-3 text-center">
+              <li key={t.key} className="flex flex-col items-center rounded-xl bg-glass p-3 text-center">
                 <ThemeThumb themeKey={t.key} className="size-16 rounded-lg" />
-                <p className="mt-1 text-[15px] font-bold">{t.name}</p>
-                <p className="text-[13px] text-muted">{t.kind === "wallpaper" ? "벽지" : "바닥"}</p>
-                {owned ? <p className="text-[13px] text-muted">가진 것</p> : <Price n={t.price} coins={coins} />}
-                <button type="button" disabled={using || (!owned && coins < t.price)} onClick={() => void actions.act("/shop/theme", { key: t.key })} className="btn btn-primary mt-2 h-10 min-h-0 w-full text-[14px]">
+                <p className="mt-1 text-body font-semibold">{t.name}</p>
+                <p className="text-aside text-dim">{t.kind === "wallpaper" ? "벽지" : "바닥"}</p>
+                {owned ? <p className="text-aside text-dim">가진 것</p> : <Price n={t.price} coins={coins} />}
+                <button type="button" disabled={using || (!owned && coins < t.price)} onClick={() => void actions.act("/shop/theme", { key: t.key })} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
                   {using ? "쓰는 중" : owned ? "바르기" : coins < t.price ? "깃털이 모자라요" : "사서 바르기"}
                 </button>
               </li>
@@ -117,12 +117,12 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
       ) : (
         <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
           {list.map((d) => (
-            <li key={d.key} className="flex flex-col items-center rounded-2xl bg-well p-3 text-center">
+            <li key={d.key} className="flex flex-col items-center rounded-xl bg-glass p-3 text-center">
               <ItemThumb itemKey={d.key} className="h-20 w-full" />
-              <p className="mt-1 text-[15px] leading-tight font-bold">{d.name}</p>
-              <p className="mt-0.5 text-[13px] leading-snug text-muted">{d.blurb}</p>
+              <p className="mt-1 text-body leading-tight font-semibold">{d.name}</p>
+              <p className="mt-0.5 text-aside leading-snug text-dim">{d.blurb}</p>
               <Price n={d.price} coins={coins} />
-              <button type="button" disabled={coins < d.price} onClick={() => void actions.act("/shop/item", { key: d.key })} className="btn btn-primary mt-2 h-10 min-h-0 w-full text-[14px]">
+              <button type="button" disabled={coins < d.price} onClick={() => void actions.act("/shop/item", { key: d.key })} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
                 {coins < d.price ? "깃털이 모자라요" : "사기"}
               </button>
             </li>
@@ -144,7 +144,7 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
 
   return (
     <Sheet open onClose={onClose} title={`창고 ${stored.length}/${slots}칸`}>
-      <p className="mb-3 text-[14px] text-muted">안 쓰는 물건을 넣어 두는 곳이에요. 창고에 든 화분과 어항은 꺼낼 때까지 그대로 멈춰 있어요.</p>
+      <p className="mb-3 text-ui text-dim">안 쓰는 물건을 넣어 두는 곳이에요. 창고에 든 화분과 어항은 꺼낼 때까지 그대로 멈춰 있어요.</p>
       <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
         {Array.from({ length: STORAGE_MAX }, (_, i) => {
           const item = stored[i];
@@ -152,11 +152,11 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
             const def = itemDef(item.key)!;
             const fish = item.tank?.fish.length ?? 0;
             return (
-              <li key={item.id} className="flex flex-col items-center rounded-2xl bg-well p-3 text-center">
+              <li key={item.id} className="flex flex-col items-center rounded-xl bg-glass p-3 text-center">
                 <ItemThumb itemKey={item.key} view={item} className="h-16 w-full" />
-                <p className="mt-1 text-[15px] leading-tight font-bold">{def.name}</p>
-                {fish > 0 && <p className="text-[12px] text-muted">물고기 {fish}마리와 함께</p>}
-                <button type="button" onClick={() => void actions.act(`/items/${item.id}/place`)} className="btn btn-primary mt-2 h-10 min-h-0 w-full text-[14px]">
+                <p className="mt-1 text-body leading-tight font-semibold">{def.name}</p>
+                {fish > 0 && <p className="text-meta text-dim">물고기 {fish}마리와 함께</p>}
+                <button type="button" onClick={() => void actions.act(`/items/${item.id}/place`)} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
                   방에 두기
                 </button>
                 <button
@@ -166,7 +166,7 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
                     setSelling(null);
                     void actions.act(`/items/${item.id}/sell`);
                   }}
-                  className={`btn mt-1.5 h-10 min-h-0 w-full text-[14px] ${selling === item.id ? "bg-danger text-white" : "btn-line"}`}
+                  className={`btn mt-1.5 h-10 min-h-0 w-full text-ui ${selling === item.id ? "btn-refuse" : "btn-pill"}`}
                 >
                   {selling === item.id ? (fish > 0 ? "물고기도 보내요. 팔까요?" : "정말 팔까요?") : <>팔기 <Feathers n={sellPrice(def.price)} /></>}
                 </button>
@@ -175,22 +175,22 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
           }
           if (i < slots)
             return (
-              <li key={`empty-${i}`} className="grid min-h-[150px] place-items-center rounded-2xl border-2 border-dashed border-line text-[14px] text-muted">
+              <li key={`empty-${i}`} className="grid min-h-[150px] place-items-center rounded-xl border-2 border-dashed border-edge text-ui text-dim">
                 빈칸
               </li>
             );
           if (i === slots)
             return (
-              <li key="expand" className="flex min-h-[150px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-egg-deep/50 p-3 text-center">
-                <Icon name="plus" className="size-6 text-egg-deep" />
-                <p className="text-[14px] font-bold">한 칸 넓히기</p>
-                <button type="button" disabled={coins < price} onClick={() => void actions.act("/storage/expand")} className="btn btn-primary h-10 min-h-0 w-full text-[14px]">
+              <li key="expand" className="flex min-h-[150px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-foreground/40 p-3 text-center">
+                <Icon name="plus" className="size-6 text-foreground" />
+                <p className="text-ui font-semibold">한 칸 넓히기</p>
+                <button type="button" disabled={coins < price} onClick={() => void actions.act("/storage/expand")} className="btn btn-approve h-10 min-h-0 w-full text-ui">
                   <Feathers n={price} />
                 </button>
               </li>
             );
           return (
-            <li key={`lock-${i}`} className="grid min-h-[150px] place-items-center rounded-2xl bg-well/60 text-muted" aria-label="잠긴 칸">
+            <li key={`lock-${i}`} className="grid min-h-[150px] place-items-center rounded-xl bg-glass text-dim" aria-label="잠긴 칸">
               <Icon name="lock" className="size-5 opacity-50" />
             </li>
           );
@@ -205,11 +205,11 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
 function Bar({ value, label, tone }: { value: number; label: string; tone: string }) {
   return (
     <div>
-      <div className="flex justify-between text-[14px]">
-        <span className="font-bold">{label}</span>
-        <span className="text-muted">{value}%</span>
+      <div className="flex justify-between text-ui">
+        <span className="font-semibold">{label}</span>
+        <span className="text-dim">{value}%</span>
       </div>
-      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-well" role="meter" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-glass" role="meter" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(3, value)}%` }} />
       </div>
     </div>
@@ -232,8 +232,8 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
         <div className="flex items-center gap-4">
           <ItemThumb itemKey={item.key} view={item} className="h-28 w-24 shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="hand text-[22px] leading-snug">{p.wilted ? "시들었어요. 물을 주면 다시 살아나요." : stageName(item.key, p.stage)}</p>
-            <p className="mt-1 text-[14px] text-muted">
+            <p className=" text-heading leading-snug">{p.wilted ? "시들었어요. 물을 주면 다시 살아나요." : stageName(item.key, p.stage)}</p>
+            <p className="mt-1 text-ui text-dim">
               {p.ready
                 ? `${josa(pdef.harvest, "을", "를")} 거두면 깃털 ${pdef.reward}개를 받아요.`
                 : p.nextHours !== null
@@ -243,15 +243,15 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
           </div>
         </div>
         <div className="mt-4">
-          <Bar value={p.water} label="흙의 물기" tone={p.water < 30 ? "bg-blush" : "bg-[#5BA7D8]"} />
-          <p className="mt-2 text-[13px] text-muted">물은 {pdef.waterHours}시간이면 다 말라요. 방이 지저분하면 절반 속도로 자라요.</p>
+          <Bar value={p.water} label="흙의 물기" tone={p.water < 30 ? "bg-caution" : "bg-foreground/70"} />
+          <p className="mt-2 text-aside text-dim">물은 {pdef.waterHours}시간이면 다 말라요. 방이 지저분하면 절반 속도로 자라요.</p>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <button type="button" disabled={!p.thirsty} onClick={() => void actions.act(`/items/${item.id}/water`)} className="btn btn-primary h-12">
+          <button type="button" disabled={!p.thirsty} onClick={() => void actions.act(`/items/${item.id}/water`)} className="btn btn-approve h-12">
             <Icon name="drop" className="size-[18px]" />
             {p.thirsty ? "물 주기" : "아직 촉촉해요"}
           </button>
-          <button type="button" disabled={!p.ready} onClick={() => void actions.act(`/items/${item.id}/harvest`)} className="btn btn-quiet h-12">
+          <button type="button" disabled={!p.ready} onClick={() => void actions.act(`/items/${item.id}/harvest`)} className="btn btn-raised h-12">
             <Icon name="sparkle" className="size-[18px]" />
             {pdef.harvest} 거두기
           </button>
@@ -266,25 +266,25 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
       <div className="flex items-center gap-4">
         <ItemThumb itemKey={item.key} view={item} className="h-24 w-28 shrink-0" />
         <div className="min-w-0 flex-1 space-y-3">
-          <Bar value={t.clarity} label="물의 맑기" tone={t.clarity < 40 ? "bg-blush" : "bg-[#5BA7D8]"} />
-          <p className="text-[13px] text-muted">
+          <Bar value={t.clarity} label="물의 맑기" tone={t.clarity < 40 ? "bg-caution" : "bg-foreground/70"} />
+          <p className="text-aside text-dim">
             물고기 {t.fish.length}/{t.capacity}마리. 물은 나흘이면 탁해지고, 물고기는 하루면 배고파해요.
           </p>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <button type="button" disabled={!t.fish.length || t.fish.every((f) => f.hunger >= 70)} onClick={() => void actions.act(`/items/${item.id}/feed`)} className="btn btn-primary h-12 px-2 text-[15px]">
+        <button type="button" disabled={!t.fish.length || t.fish.every((f) => f.hunger >= 70)} onClick={() => void actions.act(`/items/${item.id}/feed`)} className="btn btn-approve h-12 px-2 text-body">
           먹이 주기
         </button>
-        <button type="button" disabled={t.clarity >= 60} onClick={() => void actions.act(`/items/${item.id}/scrub`)} className="btn btn-quiet h-12 px-2 text-[15px]">
+        <button type="button" disabled={t.clarity >= 60} onClick={() => void actions.act(`/items/${item.id}/scrub`)} className="btn btn-raised h-12 px-2 text-body">
           물 갈기
         </button>
-        <button type="button" disabled={t.fish.length >= t.capacity} onClick={() => actions.openSheet({ kind: "shop", tab: "fish", tankId: item.id })} className="btn btn-quiet h-12 px-2 text-[15px]">
+        <button type="button" disabled={t.fish.length >= t.capacity} onClick={() => actions.openSheet({ kind: "shop", tab: "fish", tankId: item.id })} className="btn btn-raised h-12 px-2 text-body">
           물고기 들이기
         </button>
       </div>
       {t.fish.length > 0 && (
-        <ul className="mt-4 divide-y divide-line rounded-2xl bg-well">
+        <ul className="mt-4 divide-y divide-edge-soft rounded-xl bg-glass">
           {t.fish.map((f) => (
             <li key={f.id} className="flex items-center gap-3 px-3 py-3">
               <FishThumb species={f.species} className="h-8 w-12 shrink-0" />
@@ -299,14 +299,14 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
                     }}
                   >
                     <input className="field h-10 min-h-0 py-1" value={name} onChange={(e) => setName(e.target.value)} maxLength={8} autoFocus aria-label="물고기 이름" />
-                    <button className="btn btn-primary h-10 min-h-0 px-3 text-[14px]">저장</button>
+                    <button className="btn btn-approve h-10 min-h-0 px-3 text-ui">저장</button>
                   </form>
                 ) : (
-                  <button type="button" className="text-left text-[15px] font-bold" onClick={() => (setRenaming(f.id), setName(f.name))}>
-                    {f.name} <Icon name="pencil" className="inline size-3.5 text-muted" />
+                  <button type="button" className="text-left text-body font-semibold" onClick={() => (setRenaming(f.id), setName(f.name))}>
+                    {f.name} <Icon name="pencil" className="inline size-3.5 text-dim" />
                   </button>
                 )}
-                <p className="text-[13px] text-muted">
+                <p className="text-aside text-dim">
                   {f.sick ? "기운이 없어요. " : ""}
                   배부름 {f.hunger}%, {f.adult ? "다 자랐어요" : `${Math.round(f.grown * 100)}% 자랐어요`}
                 </p>
@@ -318,7 +318,7 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
                   setReleasing(null);
                   void actions.act(`/fish/${f.id}`, undefined, "DELETE");
                 }}
-                className={`h-10 shrink-0 rounded-xl px-2.5 text-[13px] ${releasing === f.id ? "bg-danger text-white" : "text-muted"}`}
+                className={`focus-ring h-10 shrink-0 rounded-lg px-2.5 text-aside ${releasing === f.id ? "bg-reject-wash text-reject" : "text-dim hover:text-reject"}`}
               >
                 {releasing === f.id ? "보낼까요?" : "보내 주기"}
               </button>
@@ -393,64 +393,64 @@ export function SettingsSheet({
       onClose={onClose}
       title="둥지 설정"
       footer={
-        <button type="button" className="btn btn-primary h-12 w-full" disabled={saving} onClick={save}>
+        <button type="button" className="btn btn-approve h-12 w-full" disabled={saving} onClick={save}>
           {saving ? "저장하는 중" : "저장"}
         </button>
       }
     >
       <div className="space-y-4">
         {home.invite && (
-          <div className="rounded-2xl bg-egg/25 p-4">
-            <p className="text-[15px] font-bold">함께 살 사람을 불러요</p>
-            <p className="mt-1 text-[14px] text-muted">
+          <div className="rounded-xl bg-glass-raised p-4">
+            <p className="text-body font-semibold">함께 살 사람을 불러요</p>
+            <p className="mt-1 text-ui text-dim">
               {me.via === "jarvis"
                 ? "상대가 jarvis 의 둥지 화면을 열면 이 둥지로 바로 들어와요. jarvis 밖의 사람은 가입할 때 이 코드를 적으면 돼요."
                 : "상대가 가입할 때 \u2018초대받았어요\u2019를 고르고 이 코드를 적으면 같은 둥지에 들어와요."}
             </p>
-            <p className="mt-3 text-center text-[30px] font-bold tracking-[0.35em]" aria-label={`초대 코드 ${home.invite.split("").join(" ")}`}>
+            <p className="mt-3 text-center text-display font-semibold tracking-[0.35em]" aria-label={`초대 코드 ${home.invite.split("").join(" ")}`}>
               {home.invite}
             </p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button type="button" className="btn btn-primary h-11" onClick={share}>
+              <button type="button" className="btn btn-approve h-11" onClick={share}>
                 초대 보내기
               </button>
-              <button type="button" className="btn btn-quiet h-11" onClick={() => void actions.act("/home/invite")}>
+              <button type="button" className="btn btn-raised h-11" onClick={() => void actions.act("/home/invite")}>
                 코드 새로 받기
               </button>
             </div>
           </div>
         )}
         <label className="block">
-          <span className="mb-1.5 block text-[14px] font-bold">둥지 이름</span>
+          <span className="mb-1.5 block text-ui font-semibold">둥지 이름</span>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={16} />
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-[14px] font-bold">한 줄 소개</span>
+          <span className="mb-1.5 block text-ui font-semibold">한 줄 소개</span>
           <input className="field" value={intro} onChange={(e) => setIntro(e.target.value)} maxLength={60} placeholder="이웃이 놀러 오면 보이는 말" />
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-[14px] font-bold">처음 만난 날</span>
+          <span className="mb-1.5 block text-ui font-semibold">처음 만난 날</span>
           <input className="field" type="date" value={since} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setSince(e.target.value)} />
         </label>
-        <label className="flex min-h-[52px] items-center gap-3 rounded-2xl bg-well px-4">
+        <label className="flex min-h-[52px] items-center gap-3 rounded-xl bg-glass px-4">
           <span className="flex-1">
-            <span className="block text-[15px] font-bold">이웃 목록에 보이기</span>
-            <span className="block text-[13px] text-muted">끄면 주소를 아는 사람만 놀러 올 수 있어요</span>
+            <span className="block text-body font-semibold">이웃 목록에 보이기</span>
+            <span className="block text-aside text-dim">끄면 주소를 아는 사람만 놀러 올 수 있어요</span>
           </span>
-          <input type="checkbox" className="size-6 accent-[var(--egg-deep)]" checked={listed} onChange={(e) => setListed(e.target.checked)} />
+          <input type="checkbox" className="size-6 accent-[var(--foreground)]" checked={listed} onChange={(e) => setListed(e.target.checked)} />
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-[14px] font-bold">내 이름</span>
+          <span className="mb-1.5 block text-ui font-semibold">내 이름</span>
           <input className="field" value={myName} onChange={(e) => setMyName(e.target.value)} maxLength={10} />
         </label>
         {me.via === "jarvis" ? (
-          <p className="border-t border-line pt-4 text-[14px] text-muted">jarvis 로 들어왔어요. 로그인과 나가기는 jarvis 가 맡아요.</p>
+          <p className="border-t border-edge pt-4 text-ui text-dim">jarvis 로 들어왔어요. 로그인과 나가기는 jarvis 가 맡아요.</p>
         ) : (
-        <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
-          <p className="text-[14px] text-muted">아이디 {me.login}</p>
+        <div className="flex items-center justify-between gap-3 border-t border-edge pt-4">
+          <p className="text-ui text-dim">아이디 {me.login}</p>
           <button
             type="button"
-            className="btn btn-line h-10 min-h-0 text-[14px]"
+            className="btn btn-pill h-10 min-h-0 text-ui"
             onClick={async () => {
               await post("/auth/logout");
               onMe(null);
@@ -478,23 +478,23 @@ export function LedgerSheet({ onClose }: { onClose: () => void }) {
   }, []);
   return (
     <Sheet open onClose={onClose} title="깃털 내역">
-      <p className="mb-3 text-[14px] text-muted">깃털은 둘이 함께 써요. 매일 들어오기, 일기, 청소, 물 주기, 이웃 방명록으로 모여요.</p>
+      <p className="mb-3 text-ui text-dim">깃털은 둘이 함께 써요. 매일 들어오기, 일기, 청소, 물 주기, 이웃 방명록으로 모여요.</p>
       {rows === null ? (
-        <p className="py-6 text-center text-muted">불러오는 중</p>
+        <p className="py-6 text-center text-dim">불러오는 중</p>
       ) : rows.length === 0 ? (
-        <p className="py-6 text-center text-muted">아직 내역이 없어요</p>
+        <p className="py-6 text-center text-dim">아직 내역이 없어요</p>
       ) : (
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-edge-soft">
           {rows.map((r, i) => (
             <li key={i} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px]">{r.reason}</p>
-                <p className="text-[12px] text-muted">
+                <p className="truncate text-body">{r.reason}</p>
+                <p className="text-meta text-dim">
                   {r.by ? `${r.by}, ` : ""}
                   {stamp(r.at)}
                 </p>
               </div>
-              <span className={`text-[15px] font-bold tabular-nums ${r.delta >= 0 ? "text-egg-deep" : "text-muted"}`}>{r.delta >= 0 ? `+${r.delta}` : r.delta}</span>
+              <span className={`text-body font-semibold tabular-nums ${r.delta >= 0 ? "text-foreground" : "text-dim"}`}>{r.delta >= 0 ? `+${r.delta}` : r.delta}</span>
             </li>
           ))}
         </ul>
@@ -531,20 +531,20 @@ export function NameSheet({ home, onSaved, onMe }: { home: HomeView; onSaved: ()
   return (
     <Sheet open onClose={() => undefined} title="둥지에 처음 왔어요">
       <form onSubmit={save} className="space-y-4">
-        <p className="text-[15px] text-muted">
+        <p className="text-body text-dim">
           {first ? "둘이 함께 쓸 둥지를 지었어요. 이웃에게 보일 이름을 정해 주세요." : `${home.name}에 들어왔어요. 둥지에서 불릴 이름을 정해 주세요.`}
         </p>
         <label className="block">
-          <span className="mb-1.5 block text-[14px] font-bold">내 이름</span>
+          <span className="mb-1.5 block text-ui font-semibold">내 이름</span>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={10} required autoFocus />
         </label>
         {first && (
           <label className="block">
-            <span className="mb-1.5 block text-[14px] font-bold">둥지 이름</span>
+            <span className="mb-1.5 block text-ui font-semibold">둥지 이름</span>
             <input className="field" value={homeName} onChange={(e) => setHomeName(e.target.value)} maxLength={16} placeholder="우리 둥지" />
           </label>
         )}
-        <button className="btn btn-primary h-12 w-full" disabled={saving || !name.trim()}>
+        <button className="btn btn-approve h-12 w-full" disabled={saving || !name.trim()}>
           {saving ? "저장하는 중" : "들어가기"}
         </button>
       </form>

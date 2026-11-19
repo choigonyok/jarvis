@@ -349,8 +349,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
                 width={itemDef(i.key)!.w}
                 height={1.75}
                 rx={0.06}
-                fill={drag && !drag.valid ? "rgba(194,69,58,.2)" : "rgba(79,167,156,.2)"}
-                stroke={drag && !drag.valid ? "#C2453A" : "#2E8A7F"}
+                style={drag && !drag.valid ? { fill: "color-mix(in oklab, var(--reject) 25%, transparent)", stroke: "var(--reject)" } : { fill: "color-mix(in oklab, var(--foreground) 18%, transparent)", stroke: "var(--foreground)" }}
                 strokeWidth={0.04}
                 strokeDasharray="0.14 0.08"
               />
@@ -368,7 +367,9 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
         [...floorItems, ...unders]
           .filter((e) => e.item.id === selected)
           .map((e) => (
-            <Flat key="sel" x={e.x} y={e.y} w={e.w} d={e.d} fill={drag && !drag.valid ? "rgba(194,69,58,.35)" : "rgba(79,167,156,.32)"} stroke={drag && !drag.valid ? "#C2453A" : "#2E8A7F"} />
+            <g key="sel" style={drag && !drag.valid ? { fill: "color-mix(in oklab, var(--reject) 35%, transparent)", stroke: "var(--reject)" } : { fill: "color-mix(in oklab, var(--foreground) 22%, transparent)", stroke: "var(--foreground)" }}>
+              <Flat x={e.x} y={e.y} w={e.w} d={e.d} fill="inherit" stroke="inherit" />
+            </g>
           ))}
 
       {/* 먼지 */}

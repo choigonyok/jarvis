@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { MOOD_NAMES, MOODS, type DiaryDay, type DiaryMonth, type HomeView, type Me, type Mood, type Reward } from "../../shared/api";
+import { BatteryLow, Cloud, CloudRain, Heart, type LucideIcon, Snowflake, Sun } from "lucide-react";
 import { ApiError, del, get, post, put } from "../lib/api";
 import { stamp, todayKey } from "../lib/time";
 import { useToast } from "../lib/toast";
@@ -9,45 +10,20 @@ import { Icon } from "../ui/icons";
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 
+const MOOD_ICON: Record<Mood, LucideIcon> = {
+  sun: Sun,
+  cloud: Cloud,
+  rain: CloudRain,
+  snow: Snowflake,
+  heart: Heart,
+  tired: BatteryLow,
+};
+
+/** 그날의 날씨·기분: 색 없는 선 아이콘(콘솔의 아이콘과 같은 굵기) */
 function MoodMark({ mood, className = "size-5" }: { mood: string; className?: string }) {
   const m = (MOODS as readonly string[]).includes(mood) ? (mood as Mood) : "sun";
-  const paths: Record<Mood, React.ReactNode> = {
-    sun: (
-      <>
-        <circle cx={12} cy={12} r={4.2} fill="#F2C230" />
-        {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
-          <line key={a} x1={12 + Math.cos((a * Math.PI) / 180) * 6.5} y1={12 + Math.sin((a * Math.PI) / 180) * 6.5} x2={12 + Math.cos((a * Math.PI) / 180) * 9} y2={12 + Math.sin((a * Math.PI) / 180) * 9} stroke="#E0A91A" strokeWidth={1.6} strokeLinecap="round" />
-        ))}
-      </>
-    ),
-    cloud: <path d="M7 17.5h10a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1A3 3 0 0 0 7 17.5Z" fill="#B9C4CC" />,
-    rain: (
-      <>
-        <path d="M7 14h10a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1A3 3 0 0 0 7 14Z" fill="#9FB0BB" />
-        <path d="M9 16.5l-1 3 M13 16.5l-1 3 M17 16.5l-1 3" stroke="#5BA7D8" strokeWidth={1.6} strokeLinecap="round" />
-      </>
-    ),
-    snow: (
-      <>
-        <path d="M7 14h10a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1A3 3 0 0 0 7 14Z" fill="#C9D3DA" />
-        <circle cx={9} cy={18} r={1.2} fill="#9FC7D9" />
-        <circle cx={13} cy={19.5} r={1.2} fill="#9FC7D9" />
-        <circle cx={16.5} cy={17.5} r={1.2} fill="#9FC7D9" />
-      </>
-    ),
-    heart: <path d="M12 19.5s-7-4.3-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.3c0 4.9-7 9.2-7 9.2Z" fill="#E9867F" />,
-    tired: (
-      <>
-        <circle cx={12} cy={12} r={7.5} fill="#E6D3BD" />
-        <path d="M8.5 11h2.5 M13 11h2.5 M9.5 15.5h5" stroke="#7A5A40" strokeWidth={1.5} strokeLinecap="round" />
-      </>
-    ),
-  };
-  return (
-    <svg viewBox="0 0 24 24" className={className} role="img" aria-label={MOOD_NAMES[m]}>
-      {paths[m]}
-    </svg>
-  );
+  const C = MOOD_ICON[m];
+  return <C className={className} strokeWidth={1.8} role="img" aria-label={MOOD_NAMES[m]} />;
 }
 
 export function DiaryPanel({ me, home, stamp: changed, onRewards }: { me: Me; home: HomeView; stamp: number; onRewards: (r: Reward[]) => void }) {
@@ -77,19 +53,19 @@ export function DiaryPanel({ me, home, stamp: changed, onRewards }: { me: Me; ho
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl bg-card p-4">
+      <div className="rounded-xl bg-glass p-4">
         <div className="mb-3 flex items-center justify-between">
           <button type="button" className="icon-btn" onClick={() => shift(-1)} aria-label="지난달">
             <Icon name="back" />
           </button>
-          <h2 className="text-[17px] font-bold">
+          <h2 className="text-title font-semibold">
             {y}년 {m}월 일기
           </h2>
           <button type="button" className="icon-btn" onClick={() => shift(1)} disabled={month >= today.slice(0, 7)} aria-label="다음 달">
             <Icon name="forward" />
           </button>
         </div>
-        <div className="grid grid-cols-7 gap-1 text-center text-[12px] text-muted" aria-hidden>
+        <div className="grid grid-cols-7 gap-1 text-center text-meta text-dim" aria-hidden>
           {WEEK.map((w) => (
             <span key={w}>{w}</span>
           ))}
@@ -112,24 +88,25 @@ export function DiaryPanel({ me, home, stamp: changed, onRewards }: { me: Me; ho
                 onClick={() => setDay(key)}
                 aria-pressed={day === key}
                 aria-label={`${m}월 ${i + 1}일${mine ? ", 내 일기 있음" : ""}${theirs ? `, ${partner?.name} 일기 있음` : ""}`}
-                className={`flex aspect-square max-h-14 w-full flex-col items-center justify-center justify-self-center rounded-xl text-[14px] sm:aspect-auto sm:h-14 ${day === key ? "bg-ink text-paper" : key === today ? "bg-egg/30 font-bold" : "hover:bg-well"} ${future ? "opacity-30" : ""}`}
+                className={`focus-ring tnum flex aspect-square max-h-14 w-full flex-col items-center justify-center justify-self-center rounded-lg text-ui sm:aspect-auto sm:h-14 ${future ? "text-faint" : day === key ? "bg-glass-raised text-foreground" : "text-ink hover:bg-glass"}`}
               >
-                {i + 1}
+                {/* 오늘은 숫자의 가는 링, 고른 날은 유리 한 칸(콘솔의 달력과 같다) */}
+                <span className={`grid size-7 place-items-center rounded-full ${key === today ? "font-semibold ring-1 ring-foreground/60" : ""}`}>{i + 1}</span>
                 <span className="mt-0.5 flex h-1.5 gap-0.5">
-                  {mine && <span className="size-1.5 rounded-full bg-egg-deep" />}
-                  {theirs && <span className="size-1.5 rounded-full bg-blush" />}
+                  {mine && <span className="size-1.5 rounded-full bg-mine" />}
+                  {theirs && <span className="size-1.5 rounded-full bg-partner" />}
                 </span>
               </button>
             );
           })}
         </div>
-        <p className="mt-3 flex items-center gap-3 text-[12px] text-muted">
+        <p className="mt-3 flex items-center gap-3 text-meta text-dim">
           <span className="inline-flex items-center gap-1">
-            <span className="size-2 rounded-full bg-egg-deep" /> 나
+            <span className="size-2 rounded-full bg-mine" /> 나
           </span>
           {partner && (
             <span className="inline-flex items-center gap-1">
-              <span className="size-2 rounded-full bg-blush" /> {partner.name}
+              <span className="size-2 rounded-full bg-partner" /> {partner.name}
             </span>
           )}
         </p>
@@ -158,7 +135,7 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
       .catch(() => setData({ day, entries: [], comments: [] }));
   }, [day, me.id, changed]);
 
-  if (!data) return <div className="h-40 rounded-2xl bg-card" aria-busy="true" />;
+  if (!data) return <div className="h-40 rounded-xl bg-glass" aria-busy="true" />;
   const mine = data.entries.find((e) => e.authorId === me.id);
   const partner = home.members.find((x) => x.id !== me.id);
   const theirs = partner ? data.entries.find((e) => e.authorId === partner.id) : undefined;
@@ -205,19 +182,19 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
 
   return (
     <article className="space-y-3" aria-label={`${label}의 일기`}>
-      <h3 className="text-[17px] font-bold">{label}</h3>
+      <h3 className="text-title font-semibold">{label}</h3>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
         {/* 내 쪽 */}
-        <section className="rounded-2xl bg-card p-4" aria-label="내 일기">
+        <section className="rounded-xl bg-glass p-4" aria-label="내 일기">
           <div className="mb-2 flex items-center gap-2">
-            <span className="size-2.5 rounded-full bg-egg-deep" />
-            <b className="flex-1 text-[15px]">{me.name}</b>
+            <span className="size-2 rounded-full bg-mine" />
+            <b className="flex-1 text-body">{me.name}</b>
             {mine && !editing && (
               <>
-                <button type="button" className="h-9 rounded-lg px-2 text-[14px] text-muted" onClick={() => (setMood(mine.mood as Mood), setBody(mine.body), setEditing(true))}>
+                <button type="button" className="h-9 rounded-lg px-2 text-ui text-dim" onClick={() => (setMood(mine.mood as Mood), setBody(mine.body), setEditing(true))}>
                   고치기
                 </button>
-                <button type="button" className="h-9 rounded-lg px-2 text-[14px] text-danger" onClick={remove}>
+                <button type="button" className="h-9 rounded-lg px-2 text-ui text-reject" onClick={remove}>
                   지우기
                 </button>
               </>
@@ -229,7 +206,7 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
                 <legend className="sr-only">오늘의 날씨</legend>
                 <div className="flex flex-wrap gap-1.5">
                   {MOODS.map((md) => (
-                    <label key={md} className={`flex h-10 cursor-pointer items-center gap-1 rounded-full px-2.5 text-[13px] ${mood === md ? "bg-egg/35 font-bold" : "bg-well"}`}>
+                    <label key={md} className={`flex h-10 cursor-pointer items-center gap-1 rounded-full border px-3 text-aside has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/50 ${mood === md ? "border-foreground/30 bg-glass-raised font-medium text-foreground" : "border-edge text-dim"}`}>
                       <input type="radio" name="mood" value={md} checked={mood === md} onChange={() => setMood(md)} className="sr-only" />
                       <MoodMark mood={md} />
                       {MOOD_NAMES[md]}
@@ -237,14 +214,14 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
                   ))}
                 </div>
               </fieldset>
-              <textarea className="field hand text-[20px] leading-snug" value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000} placeholder="오늘 둘이 있었던 일" aria-label="일기" required />
+              <textarea className="field  text-read leading-snug" value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000} placeholder="오늘 둘이 있었던 일" aria-label="일기" required />
               <div className="flex gap-2">
                 {mine && (
-                  <button type="button" className="btn btn-quiet flex-1" onClick={() => setEditing(false)}>
+                  <button type="button" className="btn btn-raised flex-1" onClick={() => setEditing(false)}>
                     그만두기
                   </button>
                 )}
-                <button className="btn btn-primary flex-1" disabled={busy || !body.trim()}>
+                <button className="btn btn-approve flex-1" disabled={busy || !body.trim()}>
                   {busy ? "저장하는 중" : "일기 저장"}
                 </button>
               </div>
@@ -252,42 +229,42 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
           ) : mine ? (
             <>
               <MoodMark mood={mine.mood} className="size-7" />
-              <p className="hand mt-1 text-[21px] leading-snug whitespace-pre-wrap">{mine.body}</p>
-              <p className="mt-2 text-[12px] text-muted">{stamp(mine.updatedAt)}</p>
+              <p className=" mt-1 text-read leading-snug whitespace-pre-wrap">{mine.body}</p>
+              <p className="mt-2 text-meta text-dim">{stamp(mine.updatedAt)}</p>
             </>
           ) : null}
         </section>
 
         {/* 상대 쪽 */}
-        <section className="rounded-2xl bg-card p-4" aria-label={partner ? `${partner.name}의 일기` : "상대의 일기"}>
+        <section className="rounded-xl bg-glass p-4" aria-label={partner ? `${partner.name}의 일기` : "상대의 일기"}>
           <div className="mb-2 flex items-center gap-2">
-            <span className="size-2.5 rounded-full bg-blush" />
-            <b className="text-[15px]">{partner?.name ?? "아직 혼자예요"}</b>
+            <span className="size-2 rounded-full bg-partner" />
+            <b className="text-body">{partner?.name ?? "아직 혼자예요"}</b>
           </div>
           {theirs ? (
             <>
               <MoodMark mood={theirs.mood} className="size-7" />
-              <p className="hand mt-1 text-[21px] leading-snug whitespace-pre-wrap">{theirs.body}</p>
-              <p className="mt-2 text-[12px] text-muted">{stamp(theirs.updatedAt)}</p>
+              <p className=" mt-1 text-read leading-snug whitespace-pre-wrap">{theirs.body}</p>
+              <p className="mt-2 text-meta text-dim">{stamp(theirs.updatedAt)}</p>
             </>
           ) : (
-            <p className="text-[15px] text-muted">{partner ? `${partner.name}님은 이날 일기를 아직 안 썼어요.` : "설정에서 초대 코드를 보내 상대를 불러 주세요."}</p>
+            <p className="text-body text-dim">{partner ? `${partner.name}님은 이날 일기를 아직 안 썼어요.` : "설정에서 초대 코드를 보내 상대를 불러 주세요."}</p>
           )}
         </section>
       </div>
 
       {(data.entries.length > 0 || data.comments.length > 0) && (
-        <section className="rounded-2xl bg-card p-4" aria-label="댓글">
-          <h4 className="mb-2 text-[15px] font-bold">댓글 {data.comments.length}</h4>
+        <section className="rounded-xl bg-glass p-4" aria-label="댓글">
+          <h4 className="mb-2 text-body font-semibold">댓글 {data.comments.length}</h4>
           <ul className="space-y-2">
             {data.comments.map((c) => (
-              <li key={c.id} className="flex items-start gap-2 text-[15px]">
+              <li key={c.id} className="flex items-start gap-2 text-body">
                 <b className="shrink-0">{c.author}</b>
                 <span className="min-w-0 flex-1 break-words">{c.body}</span>
                 {c.authorId === me.id && (
                   <button
                     type="button"
-                    className="shrink-0 text-muted"
+                    className="shrink-0 text-dim"
                     aria-label="댓글 지우기"
                     onClick={async () => {
                       const r = await del<DiaryDay>(`/diary/comments/${c.id}`).catch(() => null);
@@ -302,7 +279,7 @@ function DayView({ day, me, home, changed, onSaved, onRewards }: { day: string; 
           </ul>
           <form onSubmit={addComment} className="mt-3 flex gap-2">
             <input className="field h-11 min-h-0" value={comment} onChange={(e) => setComment(e.target.value)} maxLength={300} placeholder="한마디 남기기" aria-label="댓글" />
-            <button className="btn btn-primary h-11 min-h-0 shrink-0 px-4" disabled={!comment.trim()}>
+            <button className="btn btn-approve h-11 min-h-0 shrink-0 px-4" disabled={!comment.trim()}>
               달기
             </button>
           </form>

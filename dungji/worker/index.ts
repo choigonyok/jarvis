@@ -456,7 +456,9 @@ app.get("/sso/jarvis", async (c) => {
   const userId = await jarvisUser(db, who);
   await startSession(c, userId);
   const me = (await meOf(db, userId))!;
-  return c.redirect(`/h/${me.home}`, 302);
+  // 콘솔이 지금 쓰는 테마(밤·낮)를 화면에 넘긴다(src/lib/theme.ts).
+  const theme = c.req.query("theme");
+  return c.redirect(`/h/${me.home}${theme === "dark" || theme === "light" ? `?theme=${theme}` : ""}`, 302);
 });
 
 app.get("/me", async (c) => {

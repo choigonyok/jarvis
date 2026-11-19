@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { itemDef, plantDef } from "../../shared/catalog";
 import type { HomeResponse, HomeView, ItemView, Me, Reward } from "../../shared/api";
 import { api, ApiError, get } from "../lib/api";
@@ -131,8 +131,8 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     return (
       <div className="grid min-h-dvh place-items-center p-6 text-center">
         <div>
-          <p className="hand text-[28px] font-bold">{error}</p>
-          <a className="btn btn-primary mt-4" {...linkTo(`/h/${me.home}`)}>
+          <p className=" text-display font-semibold">{error}</p>
+          <a className="btn btn-approve mt-4" {...linkTo(`/h/${me.home}`)}>
             우리 둥지로
           </a>
         </div>
@@ -184,47 +184,48 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
   const visitorsLine =
     home.visits.today > 0 ? `오늘 이웃 ${home.visits.today}명이 다녀갔어요` : "오늘은 아직 다녀간 이웃이 없어요";
 
+  const tools = owner ? (
+    <div className="flex shrink-0 items-center gap-1">
+      {home.coins !== undefined && (
+        <button
+          type="button"
+          onClick={() => setSheet({ kind: "ledger" })}
+          className="focus-ring flex h-9 items-center rounded-full bg-glass px-3 text-ui font-medium"
+          aria-label={`깃털 ${home.coins}개, 내역 보기`}
+        >
+          <Feathers n={home.coins} />
+        </button>
+      )}
+      <button type="button" className="icon-btn" onClick={() => setSheet({ kind: "settings" })} aria-label="둥지 설정">
+        <Icon name="gear" />
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="min-h-dvh pb-[calc(env(safe-area-inset-bottom)+76px)] lg:pb-10">
-      {/* 머리 */}
-      <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-2 px-3 lg:px-6">
-          {owner ? (
-            // jarvis 안에서는 jarvis 머리글이 이미 '둥지'라고 말한다.
-            !EMBEDDED && <span className="hand px-1 text-[26px] leading-none font-bold text-twig">둥지</span>
-          ) : (
-            <a className="btn btn-quiet h-10 min-h-0 px-3 text-[14px]" {...linkTo(`/h/${me.home}`)}>
+    <div className="min-h-dvh pb-[calc(max(env(safe-area-inset-bottom),0.5rem)+5.5rem)] lg:pb-10">
+      {/* 머리: 콘솔 안에서는 콘솔의 머리글이 이미 '둥지'를 말하니 따로 두지 않는다. */}
+      {!EMBEDDED && (
+        <header className="sticky top-0 z-30 bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
+          <div className="mx-auto flex h-14 max-w-page-wide items-center gap-2 px-4 lg:px-8">
+            <span className="text-title font-semibold">둥지</span>
+            <span className="flex-1" />
+            {tools}
+          </div>
+        </header>
+      )}
+
+      <main className="mx-auto max-w-page-wide px-4 pt-4 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:px-8">
+        {/* 방 */}
+        <section className={`${tab === "room" ? "" : "hidden lg:block"} lg:sticky lg:top-6`} aria-label="방">
+          {!owner && (
+            <a className="focus-ring -ml-1 inline-flex h-9 items-center gap-0.5 rounded-lg pr-2 text-ui text-dim hover:text-foreground" {...linkTo(`/h/${me.home}`)}>
               <Icon name="back" className="size-4" />
-              우리 둥지로
+              우리 둥지
             </a>
           )}
-          <span className="flex-1" />
-          {owner && home.coins !== undefined && (
-            <button type="button" onClick={() => setSheet({ kind: "ledger" })} className="flex h-10 items-center rounded-full bg-card px-3.5 text-[15px] font-bold shadow-[0_1px_0_var(--line)]" aria-label={`깃털 ${home.coins}개, 내역 보기`}>
-              <Feathers n={home.coins} />
-            </button>
-          )}
-          {owner && (
-            <button type="button" className="icon-btn" onClick={() => setSheet({ kind: "settings" })} aria-label="둥지 설정">
-              <Icon name="gear" />
-            </button>
-          )}
-        </div>
-        {/* 패드·컴퓨터에서는 탭이 머리에 */}
-        <nav className="mx-auto hidden max-w-[1180px] gap-1 px-6 pb-2 lg:flex" aria-label="둥지 메뉴">
-          {tabs.map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? "page" : undefined} className={`h-10 rounded-full px-4 text-[15px] font-bold ${tab === t ? "bg-ink text-paper" : "text-muted hover:bg-well"}`}>
-              {TAB_NAMES[t](owner)}
-            </button>
-          ))}
-        </nav>
-      </header>
-
-      <main className="mx-auto max-w-[1180px] px-4 pt-4 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-start lg:gap-8 lg:px-6">
-        {/* 방 */}
-        <section className={`${tab === "room" ? "" : "hidden lg:block"} lg:sticky lg:top-[120px]`} aria-label="방">
-          <Nameplate home={home} onlineIds={onlineIds} meId={me.id} />
-          <div className="sky relative mt-3 overflow-hidden rounded-[28px] px-2 pt-5 pb-3" style={{ background: SKY[phase] }}>
+          <Nameplate home={home} onlineIds={onlineIds} meId={me.id} tools={EMBEDDED ? tools : null} />
+          <div className="sky relative mt-4 overflow-hidden rounded-2xl px-2 pt-5 pb-3" style={{ background: SKY[phase] }}>
             {phase === "night" && <Stars />}
             <Room
               home={home}
@@ -259,14 +260,14 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
             />
           ) : (
             <div className="mt-3 space-y-3">
-              <div className="flex items-center gap-3 rounded-2xl bg-card px-4 py-3">
+              <div className="flex items-center gap-3 rounded-xl bg-glass px-4 py-3">
                 <CleanMeter value={home.cleanliness} spots={home.dirt.length} />
                 {owner && partner && (
                   <button
                     type="button"
                     onClick={call.start}
                     disabled={!partnerOnline || call.state.s !== "idle"}
-                    className="btn btn-primary h-11 min-h-0 shrink-0 px-3.5 text-[15px]"
+                    className="btn btn-approve h-11 min-h-0 shrink-0 px-3.5 text-body"
                     aria-label={partnerOnline ? `${partner.name}님과 통화하기` : `${partner.name}님이 들어오면 통화할 수 있어요`}
                   >
                     <Icon name="phone" className="size-[18px]" />
@@ -276,21 +277,21 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
               </div>
               {owner ? (
                 <div className="grid grid-cols-3 gap-2">
-                  <button type="button" className="btn btn-quiet h-12 flex-col gap-0 text-[14px]" onClick={() => setEditing(true)}>
-                    <Icon name="pencil" className="size-[18px]" />
+                  <button type="button" className="btn btn-raised h-12 flex-col gap-0 text-ui" onClick={() => setEditing(true)}>
+                    <Icon name="decorate" className="size-[18px]" />
                     꾸미기
                   </button>
-                  <button type="button" className="btn btn-quiet h-12 flex-col gap-0 text-[14px]" onClick={() => setSheet({ kind: "storage" })}>
+                  <button type="button" className="btn btn-raised h-12 flex-col gap-0 text-ui" onClick={() => setSheet({ kind: "storage" })}>
                     <Icon name="box" className="size-[18px]" />
                     창고 {storageUsed}/{home.storageSlots}
                   </button>
-                  <button type="button" className="btn btn-quiet h-12 flex-col gap-0 text-[14px]" onClick={() => setSheet({ kind: "shop" })}>
+                  <button type="button" className="btn btn-raised h-12 flex-col gap-0 text-ui" onClick={() => setSheet({ kind: "shop" })}>
                     <Icon name="bag" className="size-[18px]" />
                     상점
                   </button>
                 </div>
               ) : (
-                <p className="rounded-2xl bg-card px-4 py-3 text-[15px] text-muted">
+                <p className="rounded-xl bg-glass px-4 py-3 text-body text-dim">
                   {(home.helpLeft ?? 0) > 0 && home.dirt.length > 0
                     ? `먼지를 누르면 청소를 도와줄 수 있어요. 오늘 ${home.helpLeft}개 더 치워 줄 수 있어요.`
                     : home.dirt.length === 0
@@ -304,6 +305,20 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
 
         {/* 탭 내용 */}
         <section className={`${tab === "room" ? "mt-6 lg:mt-0" : ""} space-y-6`}>
+          {/* 넓은 화면에서는 칸 이름이 오른쪽 칸 위에: 지금 칸은 굵게(콘솔 머리글처럼) */}
+          <nav className="hidden gap-5 lg:flex" aria-label="둥지 메뉴">
+            {tabs.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                aria-current={tab === t ? "page" : undefined}
+                className={`focus-ring h-9 rounded-md text-title ${tab === t ? "font-semibold text-foreground" : "text-dim hover:text-foreground"}`}
+              >
+                {TAB_NAMES[t](owner)}
+              </button>
+            ))}
+          </nav>
           {tab === "room" && (
             <>
               {owner && <CarePanel home={home} actions={actions} onDiary={() => setTab("diary")} meId={me.id} />}
@@ -317,13 +332,30 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
         </section>
       </main>
 
-      {/* 폰의 아래 탭 */}
-      <nav className="tabbar fixed inset-x-0 bottom-0 z-30 border-t border-line bg-card/95 backdrop-blur lg:hidden" aria-label="둥지 메뉴">
-        <div className="mx-auto grid max-w-[560px]" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
+      {/* 폰의 아래 탭: 콘솔의 탭 바와 같은 떠 있는 유리 막대, 지금 칸에는 렌즈 */}
+      <nav
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 lg:hidden"
+        style={{
+          paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)",
+          paddingLeft: "max(env(safe-area-inset-left), 1rem)",
+          paddingRight: "max(env(safe-area-inset-right), 1rem)",
+        }}
+        aria-label="둥지 메뉴"
+      >
+        <div className="liquid-glass pointer-events-auto mx-auto flex h-[3.75rem] rounded-full p-1.5" style={{ maxWidth: `${tabs.length * 80}px` }}>
           {tabs.map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} aria-current={tab === t ? "page" : undefined} className={`flex h-[60px] flex-col items-center justify-center gap-0.5 text-[12px] font-bold ${tab === t ? "text-egg-deep" : "text-muted"}`}>
-              <Icon name={TAB_ICONS[t]} className="size-[22px]" />
-              {TAB_NAMES[t](owner)}
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              aria-current={tab === t ? "page" : undefined}
+              className={`focus-ring relative flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full ${tab === t ? "text-foreground" : "text-dim"}`}
+            >
+              {tab === t && <span aria-hidden className="liquid-lens absolute inset-0 rounded-full" />}
+              <span className="relative flex flex-col items-center gap-[3px]">
+                <Icon name={TAB_ICONS[t]} className="size-5" strong={tab === t} />
+                <span className="text-tiny leading-none">{TAB_NAMES[t](owner)}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -352,41 +384,43 @@ export function stageName(key: string, stage: number) {
   return ["씨앗에서 싹이 났어요", "새싹이 자라요", "잎이 무성해요", key === "plant_monstera" ? "잎이 커지고 있어요" : "봉오리가 맺혔어요", bloom][stage] ?? "";
 }
 
-function Nameplate({ home, onlineIds, meId }: { home: HomeView; onlineIds: string[]; meId: string }) {
+function Nameplate({ home, onlineIds, meId, tools }: { home: HomeView; onlineIds: string[]; meId: string; tools: ReactNode }) {
   return (
     <div>
-      <div className="nameplate inline-block max-w-full rounded-lg px-4 py-1.5">
-        <h1 className="hand truncate text-[28px] leading-tight font-bold text-[#3B2B1E] lg:text-[32px]">{home.name}</h1>
+      <div className="flex items-start gap-2">
+        <h1 className="min-w-0 flex-1 truncate text-display leading-tight font-semibold tracking-tight">{home.name}</h1>
+        {tools}
       </div>
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {home.members.map((m) => {
           const on = onlineIds.includes(m.id);
           return (
-            <span key={m.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-card px-3 text-[14px] font-bold" title={on ? "들어와 있어요" : "나가 있어요"}>
-              <span className={`size-2.5 rounded-full ${on ? "bg-straw shadow-[0_0_0_3px_color-mix(in_srgb,var(--straw)_35%,transparent)]" : "bg-line"}`} />
-              {m.name}
-              {m.id === meId && <span className="font-normal text-muted">나</span>}
+            <span key={m.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-glass px-3 text-ui" title={on ? "들어와 있어요" : "나가 있어요"}>
+              <span className={`size-[7px] rounded-full ${on ? "bg-online" : "bg-faint/50"}`} />
+              <span className="font-medium">{m.name}</span>
+              {m.id === meId && <span className="text-dim">나</span>}
               <span className="sr-only">{on ? "들어와 있음" : "나가 있음"}</span>
             </span>
           );
         })}
-        {home.since && <span className="px-1.5 text-[14px] font-bold text-twig">함께한 지 {daysSince(home.since).toLocaleString("ko-KR")}일</span>}
+        {home.since && <span className="tnum px-1.5 text-ui text-dim">함께한 지 {daysSince(home.since).toLocaleString("ko-KR")}일</span>}
       </div>
-      {home.intro && <p className="hand mt-1.5 text-[21px] leading-snug">{home.intro}</p>}
+      {home.intro && <p className="mt-2 text-body text-ink">{home.intro}</p>}
     </div>
   );
 }
 
 function CleanMeter({ value, spots }: { value: number; spots: number }) {
-  const tone = value >= 70 ? "bg-egg-deep" : value >= 40 ? "bg-straw" : "bg-blush";
+  // 막대의 채움은 무채색, 치울 때가 가까우면 '곧'의 색(caution). 빨강은 반려·실패의 색이라 쓰지 않는다.
+  const tone = value >= 60 ? "bg-foreground/70" : "bg-caution";
   const word = value >= 85 ? "반짝반짝" : value >= 60 ? "괜찮아요" : value >= 35 ? "먼지가 보여요" : "치울 때가 됐어요";
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex items-baseline justify-between gap-2 text-[14px]">
-        <span className="font-bold">청결 {value}%</span>
-        <span className="truncate text-muted">{spots > 0 ? `${word}, 먼지 ${spots}개` : word}</span>
+      <div className="flex items-baseline justify-between gap-2 text-ui">
+        <span className="tnum font-medium">청결 {value}%</span>
+        <span className="truncate text-dim">{spots > 0 ? `${word}, 먼지 ${spots}개` : word}</span>
       </div>
-      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-well" role="meter" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label="청결도">
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-glass-raised" role="meter" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label="청결도">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(4, value)}%` }} />
       </div>
     </div>
@@ -396,8 +430,8 @@ function CleanMeter({ value, spots }: { value: number; spots: number }) {
 function EditBar({ item, onFlip, onStore, onDone }: { item?: ItemView; onFlip: () => void; onStore: () => void; onDone: () => void }) {
   const def = item ? itemDef(item.key) : undefined;
   return (
-    <div className="mt-3 rounded-2xl bg-card p-3">
-      <p className="px-1 text-[14px] text-muted">
+    <div className="mt-3 rounded-xl bg-glass p-3">
+      <p className="px-1 text-ui text-dim">
         {def ? (
           <>
             <b className="text-ink">{josa(def.name, "을", "를")}</b> {def.kind === "wall" ? "벽을 따라 끌거나, 놓을 벽을 눌러 옮겨요." : "끌거나, 놓을 바닥 칸을 눌러 옮겨요."}
@@ -408,18 +442,18 @@ function EditBar({ item, onFlip, onStore, onDone }: { item?: ItemView; onFlip: (
       </p>
       <div className="mt-2 flex gap-2">
         {def && def.kind !== "wall" && (
-          <button type="button" className="btn btn-quiet h-11 min-h-0 flex-1 px-2 text-[14px]" onClick={onFlip}>
+          <button type="button" className="btn btn-raised h-11 min-h-0 flex-1 px-2 text-ui" onClick={onFlip}>
             <Icon name="flip" className="size-[18px]" />
             돌리기
           </button>
         )}
         {def && (
-          <button type="button" className="btn btn-quiet h-11 min-h-0 flex-1 px-2 text-[14px]" onClick={onStore}>
+          <button type="button" className="btn btn-raised h-11 min-h-0 flex-1 px-2 text-ui" onClick={onStore}>
             <Icon name="box" className="size-[18px]" />
             창고에 넣기
           </button>
         )}
-        <button type="button" className="btn btn-primary h-11 min-h-0 flex-1 px-2 text-[14px]" onClick={onDone}>
+        <button type="button" className="btn btn-approve h-11 min-h-0 flex-1 px-2 text-ui" onClick={onDone}>
           <Icon name="check" className="size-[18px]" />
           다 꾸몄어요
         </button>
@@ -466,17 +500,17 @@ function CarePanel({ home, actions, onDiary, meId }: { home: HomeView; actions: 
 
   return (
     <div>
-      <h2 className="mb-2 text-[17px] font-bold">오늘 돌볼 것</h2>
+      <h2 className="mb-2 text-title font-semibold">오늘 돌볼 것</h2>
       {tasks.length === 0 ? (
-        <p className="rounded-2xl bg-card px-4 py-4 text-[15px] text-muted">다 돌봤어요. 이웃 둥지에 놀러 가 볼까요?</p>
+        <p className="rounded-xl bg-glass px-4 py-4 text-body text-dim">다 돌봤어요. 이웃 둥지에 놀러 가 볼까요?</p>
       ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-card">
+        <ul className="divide-y divide-edge-soft overflow-hidden rounded-xl bg-glass">
           {tasks.map((t) => (
             <li key={t.key} className="flex min-h-[60px] items-center gap-3 px-4 py-2.5">
-              <Icon name={t.icon} className="size-5 shrink-0 text-egg-deep" />
-              <span className="min-w-0 flex-1 text-[15px]">{t.text}</span>
+              <Icon name={t.icon} className="size-5 shrink-0 text-dim" />
+              <span className="min-w-0 flex-1 text-body">{t.text}</span>
               {t.action && (
-                <button type="button" onClick={t.action.run} className="btn btn-line h-10 min-h-0 shrink-0 px-3 text-[14px]">
+                <button type="button" onClick={t.action.run} className="btn btn-pill h-10 min-h-0 shrink-0 px-3 text-ui">
                   {t.action.label}
                 </button>
               )}
@@ -491,18 +525,18 @@ function CarePanel({ home, actions, onDiary, meId }: { home: HomeView; actions: 
 function VisitorsToday({ home, line }: { home: HomeView; line: string }) {
   return (
     <div>
-      <h2 className="mb-2 text-[17px] font-bold">오늘 놀러 온 이웃</h2>
-      <div className="rounded-2xl bg-card px-4 py-3">
-        <p className="text-[15px] text-muted">
+      <h2 className="mb-2 text-title font-semibold">오늘 놀러 온 이웃</h2>
+      <div className="rounded-xl bg-glass px-4 py-3">
+        <p className="text-body text-dim">
           {line}. 지금까지 {home.visits.total.toLocaleString("ko-KR")}명이 놀러 왔어요.
         </p>
         {home.visits.recent.length > 0 && (
           <ul className="mt-2 flex flex-wrap gap-2">
             {home.visits.recent.map((v, i) => (
               <li key={`${v.slug}-${i}`}>
-                <a className="inline-flex h-9 items-center gap-1 rounded-full bg-well px-3 text-[14px]" {...linkTo(`/h/${v.slug}`)}>
+                <a className="inline-flex h-9 items-center gap-1 rounded-full bg-glass px-3 text-ui" {...linkTo(`/h/${v.slug}`)}>
                   <b>{v.name}</b>
-                  <span className="text-muted">{v.home}</span>
+                  <span className="text-dim">{v.home}</span>
                 </a>
               </li>
             ))}

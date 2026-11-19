@@ -75,9 +75,10 @@ const VIEWS = [
 ];
 
 const problems = [];
-async function shoot(browser, who, view, path, file, { night = false, dark = false, before } = {}) {
+async function shoot(browser, who, view, path, file, { night = false, light = false, before } = {}) {
   const ctx = await browser.newContext({
-    colorScheme: dark ? "dark" : "light",
+    // 콘솔처럼 밤이 기본, 낮은 몇 장만
+    colorScheme: light ? "light" : "dark",
     viewport: { width: view.width, height: view.height },
     deviceScaleFactor: 2,
     isMobile: view.mobile && browser.browserType().name() === "chromium",
@@ -107,8 +108,8 @@ for (const v of VIEWS) {
 }
 await shoot(chrome, yun, VIEWS[0], `/h/${slug}`, "phone-home-night", { night: true });
 await shoot(chrome, yun, VIEWS[0], `/h/${slug}?tab=diary`, "phone-diary");
-await shoot(chrome, yun, VIEWS[0], `/h/${slug}`, "phone-home-dark", { night: true, dark: true });
-await shoot(chrome, yun, VIEWS[1], `/h/${slug}?tab=diary`, "pad-diary-dark", { dark: true });
+await shoot(chrome, yun, VIEWS[0], `/h/${slug}`, "phone-home-light", { light: true });
+await shoot(chrome, yun, VIEWS[1], `/h/${slug}?tab=diary`, "pad-diary-light", { light: true });
 await shoot(chrome, yun, VIEWS[0], `/h/${slug}?tab=guestbook`, "phone-guestbook-owner");
 await shoot(chrome, yun, VIEWS[0], `/h/${slug}?tab=neighbors`, "phone-neighbors");
 await shoot(chrome, moon, VIEWS[0], `/h/${slug}`, "phone-visit");
@@ -139,3 +140,4 @@ await safari.close();
 
 console.log(problems.length ? problems.join("\n") : "문제 없음");
 console.log(`slug=${slug}`);
+db.close();

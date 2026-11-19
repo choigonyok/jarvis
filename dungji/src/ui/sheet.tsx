@@ -49,7 +49,7 @@ export function Sheet({
       >
         <div className="sheet-grip" aria-hidden />
         <header className="flex items-center gap-3 px-5 pt-2 pb-3">
-          <h2 className="min-w-0 flex-1 truncate text-[19px] font-bold">{title}</h2>
+          <h2 className="min-w-0 flex-1 truncate text-title font-semibold">{title}</h2>
           <button type="button" onClick={onClose} className="icon-btn -mr-2" aria-label="닫기">
             <Icon name="x" />
           </button>

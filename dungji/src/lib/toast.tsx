@@ -35,10 +35,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toasts pointer-events-none fixed inset-x-0 z-[60] flex flex-col items-center gap-2 px-4" aria-live="polite">
         {list.map((t) => (
-          <div key={t.id} className="toast flex max-w-md items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-[15px] text-paper shadow-[0_8px_24px_rgba(0,0,0,.2)]">
+          <div key={t.id} className="toast liquid-glass flex max-w-md items-center gap-2 rounded-full px-4 py-2.5 text-ui text-foreground">
             {t.delta !== undefined && (
-              <span className={`flex items-center gap-1 font-bold ${t.delta >= 0 ? "text-straw" : "text-paper/70"}`}>
-                <Icon name="feather" className="size-4" />
+              <span className={`tnum flex items-center gap-1 font-medium ${t.delta >= 0 ? "text-foreground" : "text-dim"}`}>
+                <Icon name="feather" className="size-4 text-dim" />
                 {t.delta >= 0 ? `+${t.delta}` : t.delta}
               </span>
             )}

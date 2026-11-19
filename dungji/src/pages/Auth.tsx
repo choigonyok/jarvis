@@ -47,8 +47,8 @@ export function AuthPage({ onDone }: { onDone: (me: Me) => void }) {
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[1.1fr_1fr]">
       <div className="sky relative flex flex-col justify-end px-4 pt-[calc(env(safe-area-inset-top)+20px)] pb-4 lg:min-h-dvh lg:justify-center lg:px-12" style={{ background: SKY[phase] }}>
-        <p className={`hand text-[40px] leading-none font-bold lg:text-[64px] ${phase === "night" ? "text-[#F3EBD3]" : "text-[#3B3026]"}`}>둥지</p>
-        <p className={`mt-2 max-w-[22rem] text-[15px] lg:text-[17px] ${phase === "night" ? "text-[#DDE3F3]" : "text-[#4A5753]"}`}>
+        <p className={`text-display-lg leading-none font-semibold tracking-tight ${phase === "night" ? "text-[oklch(0.945_0.002_265)]" : "text-[oklch(0.2_0.006_265)]"}`}>둥지</p>
+        <p className={`mt-2 max-w-[22rem] text-body lg:text-title ${phase === "night" ? "text-[oklch(0.82_0.004_265)]" : "text-[oklch(0.4_0.006_265)]"}`}>
           둘이 꾸미고 돌보는 작은 방이에요. 같이 일기를 쓰고, 이웃 커플의 방에 놀러 가요.
         </p>
         <div className="mx-auto mt-2 w-full max-w-[440px] lg:mt-8 lg:max-w-[560px]">
@@ -58,7 +58,7 @@ export function AuthPage({ onDone }: { onDone: (me: Me) => void }) {
 
       <div className="flex justify-center px-4 py-8 lg:items-center">
         <div className="w-full max-w-[400px]">
-          <div className="mb-6 grid grid-cols-2 rounded-2xl bg-well p-1" role="tablist" aria-label="로그인 또는 가입">
+          <div className="mb-6 grid grid-cols-2 rounded-xl bg-glass p-1" role="tablist" aria-label="로그인 또는 가입">
             {(["login", "signup"] as const).map((m) => (
               <button
                 key={m}
@@ -66,7 +66,7 @@ export function AuthPage({ onDone }: { onDone: (me: Me) => void }) {
                 role="tab"
                 aria-selected={mode === m}
                 onClick={() => setMode(m)}
-                className={`h-11 rounded-xl text-[15px] font-bold ${mode === m ? "bg-card shadow-sm" : "text-muted"}`}
+                className={`h-11 rounded-xl text-body font-semibold ${mode === m ? "bg-glass-raised text-foreground" : "text-dim hover:text-foreground"}`}
               >
                 {m === "login" ? "들어가기" : "처음이에요"}
               </button>
@@ -82,9 +82,9 @@ export function AuthPage({ onDone }: { onDone: (me: Me) => void }) {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[14px] font-bold">{label}</span>
+      <span className="mb-1.5 block text-ui font-semibold">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[13px] text-muted">{hint}</span>}
+      {hint && <span className="mt-1 block text-aside text-dim">{hint}</span>}
     </label>
   );
 }
@@ -118,11 +118,11 @@ function LoginForm({ onDone }: { onDone: (me: Me) => void }) {
         <input className="field" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" required />
       </Field>
       {error && (
-        <p className="text-[14px] text-danger" role="alert">
+        <p className="text-ui text-reject" role="alert">
           {error}
         </p>
       )}
-      <button className="btn btn-primary h-12 w-full" disabled={busy}>
+      <button className="btn btn-approve h-12 w-full" disabled={busy}>
         {busy ? "확인하는 중" : "둥지로 들어가기"}
       </button>
     </form>
@@ -167,7 +167,7 @@ function SignupForm({ onDone, invited }: { onDone: (me: Me) => void; invited: st
   return (
     <form onSubmit={submit} className="space-y-4">
       <fieldset>
-        <legend className="mb-1.5 text-[14px] font-bold">둥지</legend>
+        <legend className="mb-1.5 text-ui font-semibold">둥지</legend>
         <div className="grid grid-cols-2 gap-2">
           {(
             [
@@ -175,10 +175,10 @@ function SignupForm({ onDone, invited }: { onDone: (me: Me) => void; invited: st
               ["join", "초대받았어요", "상대가 준 코드로 들어가요"],
             ] as const
           ).map(([v, title, sub]) => (
-            <label key={v} className={`cursor-pointer rounded-2xl border-[1.5px] p-3 ${how === v ? "border-egg-deep bg-egg/20" : "border-line"}`}>
+            <label key={v} className={`cursor-pointer rounded-xl border-[1.5px] p-3 ${how === v ? "border-foreground/40 bg-glass-raised" : "border-edge"}`}>
               <input type="radio" name="how" value={v} checked={how === v} onChange={() => setHow(v)} className="sr-only" />
-              <span className="block text-[15px] font-bold">{title}</span>
-              <span className="mt-0.5 block text-[13px] leading-snug text-muted">{sub}</span>
+              <span className="block text-body font-semibold">{title}</span>
+              <span className="mt-0.5 block text-aside leading-snug text-dim">{sub}</span>
             </label>
           ))}
         </div>
@@ -220,11 +220,11 @@ function SignupForm({ onDone, invited }: { onDone: (me: Me) => void; invited: st
         <input className="field" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" required />
       </Field>
       {error && (
-        <p className="text-[14px] text-danger" role="alert">
+        <p className="text-ui text-reject" role="alert">
           {error}
         </p>
       )}
-      <button className="btn btn-primary h-12 w-full" disabled={busy}>
+      <button className="btn btn-approve h-12 w-full" disabled={busy}>
         {busy ? "둥지를 짓는 중" : how === "create" ? "둥지 만들기" : "둥지에 들어가기"}
       </button>
     </form>

@@ -1,145 +1,251 @@
 @import "tailwindcss";
 
 /*
-  둥지의 색: 울새 알의 청록(egg), 둥지 나뭇가지(twig), 깃털의 짚색(straw).
-  글자는 이끼 낀 돌색(ink), 바탕은 알껍데기처럼 푸른 기가 도는 흰색(paper).
-  빨강(danger)은 지우기·끊기에만 쓴다.
+  색과 글자는 jarvis 콘솔(web/src/app/globals.css, web/DESIGN.md)과 같다. 콘솔의 일정 칸 안에 열리는 화면이라
+  한 앱처럼 읽혀야 한다: 무채색 한 줄기(색상각 265) 위에 신호색 셋(승인·반려·연결)과 누구의 것인지 말하는
+  정체성 색 둘(나 보라, 상대 호박색). 유채색은 뜻이 있을 때만 쓴다. 방 그림은 사진처럼 제 색을 가진다.
+  기본은 밤이고 낮은 data-theme="light". 콘솔 안에서는 콘솔의 테마를 따른다(src/lib/theme.ts).
 */
-:root {
-  --paper: #e9efed;
-  --card: #f9fbfa;
-  --well: #e1e8e5;
-  --ink: #26302d;
-  --muted: #5e6b67;
-  --line: #cfd9d5;
-  --egg: #8ccfc6;
-  --egg-deep: #1f7a70;
-  --egg-ink: #0f3f3a;
-  --twig: #7a5a40;
-  --twig-light: #e6d3bd;
-  --straw: #e7b74a;
-  --straw-deep: #b8861a;
-  --blush: #e9867f;
-  --danger: #b93a30;
-  --focus: #1f7a70;
-  color-scheme: light;
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+/* 넓은 화면을 마우스로 쓸 때만 누르는 것이 작아진다(콘솔과 같다). */
+@custom-variant mouse (@media (width >= 40rem) and (pointer: fine));
+
+@theme inline {
+  --font-sans: "Instrument Sans", -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-ink: color-mix(in oklab, var(--foreground) 90%, transparent);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+  --color-edge: var(--edge);
+  --color-edge-soft: var(--edge-soft);
+  --color-glass: var(--glass);
+  --color-glass-raised: var(--glass-raised);
+  --color-well: var(--well);
+  --color-popover: var(--popover);
+  --color-ring: var(--ring);
+  --color-approve: var(--approve);
+  --color-reject: var(--reject);
+  --color-online: var(--online);
+  --color-mine: var(--mine);
+  --color-partner: var(--partner);
+  --color-caution: var(--caution);
+  --color-approve-fill: color-mix(in oklab, var(--approve) 70%, transparent);
+  --color-approve-wash: color-mix(in oklab, var(--approve) 15%, transparent);
+  --color-reject-fill: color-mix(in oklab, var(--reject) 70%, transparent);
+  --color-reject-wash: color-mix(in oklab, var(--reject) 15%, transparent);
+
+  /* 글자 크기: 역할 하나에 한 크기(콘솔의 단계 그대로) */
+  --text-tiny: 10.5px;
+  --text-meta: 11.5px;
+  --text-aside: 12.5px;
+  --text-ui: 13.5px;
+  --text-body: 14.5px;
+  --text-read: var(--read);
+  --text-title: 15px;
+  --text-field: 16px;
+  --text-heading: 17px;
+  --text-lead: 20px;
+  --text-display: var(--display);
+  --text-display-lg: var(--display-lg);
+
+  --radius-sm: 0.45rem;
+  --radius-md: 0.6rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1.05rem;
+  --radius-2xl: 1.35rem;
+
+  --container-page: 46rem;
+  --container-page-wide: 72rem;
 }
 
-@media (prefers-color-scheme: dark) {
+:root {
+  --display: 26px;
+  --display-lg: 34px;
+  --read: 16px;
+}
+@media (width >= 40rem) {
   :root {
-    --paper: #141a1d;
-    --card: #1d2528;
-    --well: #232c30;
-    --ink: #e7edeb;
-    --muted: #9fb0ab;
-    --line: #2f3b3f;
-    --egg: #3f8f86;
-    --egg-deep: #7fd6cb;
-    --egg-ink: #e9fffb;
-    --twig: #d1b08f;
-    --twig-light: #3b3128;
-    --straw: #f0c75e;
-    --straw-deep: #f0c75e;
-    --blush: #f09b94;
-    --danger: #f0786d;
-    --focus: #7fd6cb;
-    color-scheme: dark;
+    --display: 30px;
+    --display-lg: 40px;
+    --read: 14.5px;
   }
 }
 
-@theme inline {
-  --font-sans: "Gowun Dodum", "Apple SD Gothic Neo", system-ui, sans-serif;
-  --font-hand: "Gaegu", "Gowun Dodum", cursive;
-  --color-paper: var(--paper);
-  --color-card: var(--card);
-  --color-well: var(--well);
-  --color-ink: var(--ink);
-  --color-muted: var(--muted);
-  --color-line: var(--line);
-  --color-egg: var(--egg);
-  --color-egg-deep: var(--egg-deep);
-  --color-egg-ink: var(--egg-ink);
-  --color-twig: var(--twig);
-  --color-twig-light: var(--twig-light);
-  --color-straw: var(--straw);
-  --color-straw-deep: var(--straw-deep);
-  --color-blush: var(--blush);
-  --color-danger: var(--danger);
+/* 밤: 콘솔이 만들어진 모습, 고른 테마가 없을 때의 모습 */
+:root {
+  color-scheme: dark;
+  --background: oklch(0.158 0.004 265);
+  --foreground: oklch(0.945 0.002 265);
+  --dim: oklch(0.672 0.004 265);
+  --faint: oklch(0.58 0.005 265);
+  --edge: oklch(1 0 0 / 9%);
+  --edge-soft: oklch(1 0 0 / 5%);
+  --glass: oklch(1 0 0 / 3.5%);
+  --glass-raised: oklch(1 0 0 / 6.5%);
+  --well: oklch(0 0 0 / 28%);
+  --popover: oklch(0.205 0.004 265);
+  --ring: oklch(0.62 0.004 265);
+  --approve: oklch(0.755 0.153 150);
+  --reject: oklch(0.687 0.176 25);
+  --online: oklch(0.79 0.152 152);
+  --mine: oklch(0.78 0.11 300);
+  --partner: oklch(0.83 0.115 72);
+  --caution: oklch(0.8 0.14 75);
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  background: var(--paper);
+/* 낮: 같은 페이지, 햇빛용. 크림색이 아니라 차가운 흰색 위의 잉크. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.2 0.006 265);
+  --dim: oklch(0.45 0.006 265);
+  --faint: oklch(0.52 0.006 265);
+  --edge: oklch(0 0 0 / 10%);
+  --edge-soft: oklch(0 0 0 / 6%);
+  --glass: oklch(0 0 0 / 3.5%);
+  --glass-raised: oklch(0 0 0 / 6%);
+  --well: oklch(0 0 0 / 4.5%);
+  --popover: oklch(1 0 0);
+  --ring: oklch(0.45 0.006 265);
+  --approve: oklch(0.52 0.13 150);
+  --reject: oklch(0.55 0.19 25);
+  --online: oklch(0.6 0.15 152);
+  --mine: oklch(0.52 0.15 300);
+  --partner: oklch(0.55 0.115 72);
+  --caution: oklch(0.63 0.135 75);
 }
 
-body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.55;
-  -webkit-tap-highlight-color: transparent;
-  overflow-x: hidden;
+@layer base {
+  * {
+    border-color: var(--edge);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    background: var(--background);
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv05";
+    font-size: var(--text-body);
+    line-height: 1.55;
+    /* 한국어는 낱말 사이에서 줄을 바꾼다(콘솔과 같다). */
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  @media (pointer: coarse) {
+    * {
+      -webkit-touch-callout: none;
+    }
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
 }
 
 body.sheet-open {
   overflow: hidden;
 }
 
-:focus-visible {
-  outline: 2.5px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 6px;
+@utility tap {
+  min-height: 44px;
+  min-width: 44px;
+}
+/* 누를 수 있는 모든 것: 키보드로 왔을 때만 링 */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+}
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
 }
 
-button {
-  cursor: pointer;
-}
-
-.hand {
-  font-family: var(--font-hand);
-  line-height: 1.35;
-}
-
-/* ── 버튼 ── */
+/* ── 버튼: 이름이 곧 역할(콘솔의 ui/button 과 같은 모양) ── */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
+  gap: 0.375rem;
   min-height: 44px;
-  padding: 0 1.1rem;
-  border-radius: 14px;
-  font-weight: 700;
-  font-size: 16px;
-  transition: transform 0.12s ease, background-color 0.15s ease;
+  padding: 0 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid transparent;
+  font-size: var(--text-body);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+  outline: none;
 }
-.btn:active {
-  transform: scale(0.97);
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.field:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: default;
-  transform: none;
 }
-.btn-primary {
-  background: var(--egg-deep);
-  color: var(--card);
+/* 이 화면에서 가장 밝은 컨트롤: 손을 올리면 승인 초록 */
+.btn-approve {
+  border-color: var(--edge);
+  background: var(--glass-raised);
+  color: var(--foreground);
 }
-@media (prefers-color-scheme: dark) {
-  .btn-primary {
-    color: #0d2a26;
-  }
+.btn-approve:hover:not(:disabled) {
+  border-color: var(--color-approve-fill);
+  background: var(--color-approve-wash);
+  color: var(--approve);
 }
-.btn-quiet {
-  background: var(--well);
-  color: var(--ink);
+.btn-raised {
+  background: var(--glass-raised);
+  color: var(--foreground);
 }
-.btn-line {
-  border: 1.5px solid var(--line);
-  color: var(--ink);
-  background: transparent;
+.btn-raised:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 15%, transparent);
+}
+.btn-soft {
+  background: var(--glass);
+  color: var(--dim);
+}
+.btn-soft:hover:not(:disabled) {
+  color: var(--foreground);
+}
+.btn-pill {
+  border-radius: 999px;
+  border-color: var(--edge);
+  color: var(--dim);
+}
+.btn-pill:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+  color: var(--foreground);
+}
+/* 확정하는 반려(팔기·지우기·끊기): 처음부터 빨강 */
+.btn-refuse {
+  border-color: var(--edge);
+  background: color-mix(in oklab, var(--edge) 30%, transparent);
+  color: var(--reject);
+}
+.btn-refuse:hover:not(:disabled) {
+  background: var(--color-reject-wash);
 }
 .icon-btn {
   display: inline-grid;
@@ -147,10 +253,11 @@ button {
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  color: var(--ink);
+  color: var(--dim);
+  outline: none;
 }
-.icon-btn:active {
-  background: var(--well);
+.icon-btn:hover {
+  color: var(--foreground);
 }
 .call-btn {
   display: grid;
@@ -159,32 +266,48 @@ button {
   height: 44px;
   border-radius: 999px;
 }
+@media (width >= 40rem) and (pointer: fine) {
+  .btn {
+    min-height: 36px;
+    font-size: var(--text-ui);
+  }
+}
 
+/* ── 적는 칸: 우물 바탕, 폰은 16px(아래면 확대된다) ── */
 .field {
   width: 100%;
-  min-height: 48px;
-  padding: 0.7rem 0.9rem;
-  border-radius: 14px;
-  background: var(--card);
-  border: 1.5px solid var(--line);
-  color: var(--ink);
-  font-size: 16px;
+  min-height: 44px;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-lg);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  color: var(--foreground);
+  font-size: var(--text-field);
+  outline: none;
+}
+.field::placeholder {
+  color: var(--faint);
 }
 .field:focus {
-  border-color: var(--egg-deep);
-  outline: none;
+  border-color: color-mix(in oklab, var(--foreground) 30%, transparent);
 }
 textarea.field {
   min-height: 120px;
   resize: vertical;
+  line-height: 1.6;
+}
+@media (width >= 40rem) and (pointer: fine) {
+  .field {
+    font-size: var(--text-ui);
+  }
 }
 
-/* ── 판(시트) ── */
+/* ── 바닥 시트: 손잡이, 44px 닫기, 넓은 화면은 가운데 ── */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
   z-index: 45;
-  background: rgba(16, 24, 22, 0.42);
+  background: oklch(0 0 0 / 50%);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -195,19 +318,20 @@ textarea.field {
   max-height: min(88dvh, 760px);
   display: flex;
   flex-direction: column;
-  background: var(--card);
-  border-radius: 24px 24px 0 0;
+  background: var(--popover);
+  color: var(--foreground);
+  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+  border-top: 1px solid var(--edge-soft);
   padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
   animation: rise 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
   outline: none;
 }
 .sheet-grip {
-  width: 40px;
-  height: 5px;
+  width: 36px;
+  height: 4px;
   border-radius: 99px;
-  background: var(--line);
-  margin: 10px auto 2px;
+  background: var(--edge);
+  margin: 8px auto 2px;
 }
 .sheet-body {
   overflow-y: auto;
@@ -216,7 +340,7 @@ textarea.field {
 }
 .sheet-footer {
   padding: 12px 20px 16px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--edge-soft);
 }
 @media (min-width: 760px) {
   .sheet-backdrop {
@@ -225,11 +349,102 @@ textarea.field {
   }
   .sheet {
     max-width: 520px;
-    border-radius: 24px;
+    border-radius: var(--radius-2xl);
+    border: 1px solid var(--edge-soft);
     padding-bottom: 0;
   }
   .sheet-grip {
     display: none;
+  }
+}
+
+/* ── 떠 있는 유리(탭 바, 알림, 통화 줄): 콘솔의 liquid-glass ── */
+.liquid-glass {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(180deg, oklch(1 0 0 / 6%), oklch(1 0 0 / 2%) 55%, oklch(1 0 0 / 3.5%));
+  -webkit-backdrop-filter: blur(20px) saturate(210%) brightness(1.12);
+  backdrop-filter: blur(20px) saturate(210%) brightness(1.12);
+  box-shadow:
+    inset 0 0 0 1.5px oklch(0 0 0 / 22%),
+    inset 0 -10px 18px -12px oklch(1 0 0 / 14%),
+    0 22px 44px -16px oklch(0 0 0 / 75%),
+    0 6px 14px -4px oklch(0 0 0 / 40%);
+}
+.liquid-glass::before,
+.liquid-lens::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.liquid-glass::before {
+  background: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 62%) 0%,
+    oklch(1 0 0 / 22%) 22%,
+    oklch(1 0 0 / 5%) 48%,
+    oklch(1 0 0 / 9%) 74%,
+    oklch(1 0 0 / 30%) 100%
+  );
+}
+.liquid-glass > * {
+  position: relative;
+  z-index: 1;
+}
+.liquid-lens {
+  background: radial-gradient(130% 90% at 50% -10%, oklch(1 0 0 / 24%), oklch(1 0 0 / 9%) 55%, oklch(1 0 0 / 6%) 100%);
+  box-shadow:
+    inset 0 -6px 10px -6px oklch(0 0 0 / 45%),
+    inset 0 4px 8px -6px oklch(1 0 0 / 40%),
+    0 4px 12px -4px oklch(0 0 0 / 55%);
+}
+.liquid-lens::before {
+  background: linear-gradient(160deg, oklch(1 0 0 / 70%) 0%, oklch(1 0 0 / 18%) 35%, oklch(1 0 0 / 4%) 60%, oklch(1 0 0 / 22%) 100%);
+}
+:root[data-theme="light"] .liquid-glass {
+  background: linear-gradient(180deg, oklch(1 0 0 / 66%), oklch(1 0 0 / 52%) 55%, oklch(1 0 0 / 60%));
+  -webkit-backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+  backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+  box-shadow:
+    inset 0 0 0 1px oklch(0 0 0 / 5%),
+    inset 0 -10px 18px -12px oklch(1 0 0 / 70%),
+    0 18px 40px -16px oklch(0.2 0.006 265 / 30%),
+    0 4px 12px -4px oklch(0.2 0.006 265 / 12%);
+}
+:root[data-theme="light"] .liquid-glass::before {
+  background: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 100%) 0%,
+    oklch(1 0 0 / 60%) 22%,
+    oklch(0 0 0 / 4%) 48%,
+    oklch(0 0 0 / 6%) 74%,
+    oklch(1 0 0 / 80%) 100%
+  );
+}
+:root[data-theme="light"] .liquid-lens {
+  background: radial-gradient(130% 90% at 50% -10%, oklch(0 0 0 / 4%), oklch(0 0 0 / 7.5%) 55%, oklch(0 0 0 / 9%) 100%);
+  box-shadow:
+    inset 0 -6px 10px -6px oklch(0 0 0 / 10%),
+    inset 0 4px 8px -6px oklch(1 0 0 / 90%),
+    0 2px 8px -4px oklch(0.2 0.006 265 / 18%);
+}
+:root[data-theme="light"] .liquid-lens::before {
+  background: linear-gradient(160deg, oklch(1 0 0 / 95%) 0%, oklch(1 0 0 / 35%) 35%, oklch(0 0 0 / 4%) 60%, oklch(1 0 0 / 55%) 100%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-glass {
+    background: oklch(0.22 0.004 265 / 96%);
+  }
+  :root[data-theme="light"] .liquid-glass {
+    background: oklch(0.97 0.002 265 / 97%);
   }
 }
 
@@ -259,7 +474,7 @@ textarea.field {
 }
 .room-selected {
   cursor: grabbing;
-  filter: drop-shadow(0 0 2.5px var(--egg-deep)) drop-shadow(0 0 1px var(--egg-deep));
+  filter: drop-shadow(0 0 2px var(--foreground)) drop-shadow(0 0 1px var(--foreground));
 }
 .room-ghost {
   opacity: 0.55;
@@ -337,14 +552,14 @@ textarea.field {
   }
 }
 
-/* 위쪽에 뜨는 통화 줄과 알림은 노치 아래로 */
+/* 위쪽에 뜨는 통화 줄, 아래쪽 탭 바 위의 알림 */
 .call-bar {
   top: calc(env(safe-area-inset-top) + 10px);
 }
 .toasts {
-  bottom: calc(env(safe-area-inset-bottom) + 84px);
+  bottom: calc(max(env(safe-area-inset-bottom), 0.5rem) + 4.5rem);
 }
-@media (min-width: 900px) {
+@media (min-width: 1024px) {
   .toasts {
     bottom: 28px;
   }
@@ -353,22 +568,9 @@ textarea.field {
   animation: rise 0.22s ease;
 }
 
-.tabbar {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* 나무 명패: 물건이라 밤 화면에서도 같은 나무색이다. */
-.nameplate {
-  background:
-    repeating-linear-gradient(90deg, transparent 0 22px, rgba(0, 0, 0, 0.035) 22px 23px),
-    #e6d3bd;
-  border: 2px solid #7a5a40;
-  box-shadow: 0 3px 0 #7a5a40;
-}
-
 @keyframes rise {
   from {
-    transform: translateY(16px);
+    transform: translateY(12px);
     opacity: 0;
   }
 }
@@ -376,6 +578,18 @@ textarea.field {
   from {
     opacity: 0;
   }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+.anim-breathe {
+  animation: breathe 2.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

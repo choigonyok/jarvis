@@ -387,4 +387,5 @@ check("한 주소에서 하루 스무 번 넘게 가입을 시도하면 막힌�
 db.prepare("DELETE FROM claims WHERE kind = 'signup'").run();
 
 console.log(`\n${passed} passed, ${failed} failed`);
+db.close();
 process.exit(failed ? 1 : 0);

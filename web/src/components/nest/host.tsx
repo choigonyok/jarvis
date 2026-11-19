@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { usePathname } from "next/navigation";
 import { Failed } from "@/components/shell/failed";
 import { useRole } from "@/components/shell/role";
+import { themeNow } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,7 +22,12 @@ import { cn } from "@/lib/utils";
  * Both are under choigonyok.com, so 둥지's own sign-in cookie, set inside this
  * frame, is a first-party one - Safari keeps it. The frame may use the
  * microphone (the call) and nothing else of this page.
+ *
+ * 둥지 wears the console's colours and type (dungji/src/styles.css) and its
+ * theme: the one the header's switch chose goes with the ticket, and a switch
+ * afterwards is told to the frame (dungji/src/lib/theme.ts).
  */
+
 
 let slot: HTMLElement | null = null;
 const listeners = new Set<() => void>();
@@ -58,6 +64,7 @@ function Host() {
   if (here && !opened) setOpened(true);
 
   const box = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("ticket");
   const [attempt, setAttempt] = useState(0);
@@ -95,7 +102,7 @@ function Host() {
         if (!r.ok) return setPhase("failed");
         const { url } = (await r.json()) as { url: string };
         if (gone) return;
-        setSrc(url);
+        setSrc(`${url}&theme=${themeNow()}`);
         setPhase("loading");
       })
       .catch(() => !gone && setPhase("failed"));
@@ -103,6 +110,16 @@ function Host() {
       gone = true;
     };
   }, [opened, attempt]);
+
+  // The header's switch, while 둥지 is open: tell the frame, which repaints itself.
+  useEffect(() => {
+    if (!src) return;
+    const origin = new URL(src).origin;
+    const tell = () => frame.current?.contentWindow?.postMessage({ type: "dungji:theme", theme: themeNow() }, origin);
+    const watch = new MutationObserver(tell);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => watch.disconnect();
+  }, [src]);
 
   useEffect(() => {
     if (phase !== "loading") return;
@@ -124,6 +141,7 @@ function Host() {
       {src ? (
         <iframe
           key={attempt}
+          ref={frame}
           src={src}
           title="둥지"
           allow="microphone; autoplay; clipboard-write; web-share"

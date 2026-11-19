@@ -190,7 +190,7 @@ await a.getByPlaceholder("둥지나 사람 이름").fill("달빛 다락방");
 await a.getByRole("link", { name: new RegExp(`달빛 다락방 ${tag}`) }).first().click();
 await a.locator("h1", { hasText: `달빛 다락방 ${tag}` }).waitFor();
 check("이웃 둥지로 놀러 간다", a.url().includes(moon.me.home));
-await a.getByRole("link", { name: "우리 둥지로" }).click();
+await a.getByRole("link", { name: "우리 둥지", exact: true }).click();
 await a.locator("h1", { hasText: `숲속 둥지 ${tag}` }).waitFor();
 check("우리 둥지로 돌아온다", a.url().includes(slug));
 
@@ -225,4 +225,5 @@ if (ENGINE === "chromium") {
 await browser.close();
 if (errors.length) check("화면 오류 없음", false, errors.join("\n"));
 console.log(`\n${ENGINE}: ${passed} passed, ${failed} failed`);
+db.close();
 process.exit(failed ? 1 : 0);

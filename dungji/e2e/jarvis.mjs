@@ -48,6 +48,17 @@ check("방이 그려진다", await visible(frame.locator(".room-svg")));
 await page.waitForTimeout(800);
 await page.screenshot({ path: "e2e/shots/jarvis-nest.png" });
 
+// 테마: 콘솔의 밤이 둥지에도, 머리글의 테마 버튼을 누르면 둥지도 낮으로
+const frameTheme = () => frame.locator("html").getAttribute("data-theme");
+check("둥지가 콘솔의 테마(밤)로 열린다", (await frameTheme()) === "dark", await frameTheme());
+await page.getByRole("button", { name: "라이트 모드로 바꾸기" }).first().click();
+await page.waitForTimeout(500);
+check("콘솔에서 낮으로 바꾸면 둥지도 낮", (await frameTheme()) === "light", await frameTheme());
+await page.screenshot({ path: "e2e/shots/jarvis-nest-light.png" });
+await page.getByRole("button", { name: "다크 모드로 바꾸기" }).first().click();
+await page.waitForTimeout(500);
+check("다시 밤으로", (await frameTheme()) === "dark", await frameTheme());
+
 // 다른 탭에 다녀와도 같은 iframe(다시 열지 않는다): 머리글의 칸 이름으로 오간다.
 await frameEl.evaluate((el) => (el.dataset.mark = "kept"));
 await page.getByRole("link", { name: "캘린더", exact: true }).first().click();
@@ -67,4 +78,5 @@ check("입장권은 운영자 자리로 서명된다", me.status === 200 && me.u
 
 await browser.close();
 console.log(failed ? `\n${failed} failed` : "\njarvis 안의 둥지: 모두 통과");
+db.close();
 process.exit(failed ? 1 : 0);

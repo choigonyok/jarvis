@@ -263,18 +263,18 @@ function CallOverlay() {
   if (st.s === "idle") return null;
   if (st.s === "incoming")
     return (
-      <div className="fixed inset-0 z-50 grid place-items-center bg-[rgba(16,22,26,.55)] p-4" role="alertdialog" aria-label={`${st.name}님의 전화`}>
-        <div className="w-full max-w-sm rounded-[28px] bg-card p-6 text-center shadow-[0_20px_60px_rgba(0,0,0,.3)]">
-          <div className="mx-auto mb-4 grid size-20 place-items-center rounded-full bg-egg text-egg-ink ring-ring">
-            <Icon name="phone" className="size-9" />
+      <div className="fixed inset-0 z-50 grid place-items-center bg-[oklch(0_0_0/55%)] p-4" role="alertdialog" aria-label={`${st.name}님의 전화`}>
+        <div className="w-full max-w-sm rounded-2xl border border-edge-soft bg-popover p-6 text-center">
+          <div className="mx-auto mb-4 grid size-16 place-items-center rounded-full bg-glass-raised text-foreground">
+            <Icon name="phone" className="size-7" />
           </div>
-          <p className="text-[21px] font-bold">{st.name}님의 전화</p>
-          <p className="mt-1 text-muted">둘만 듣는 음성통화예요</p>
+          <p className="text-heading font-semibold">{st.name}님의 전화</p>
+          <p className="mt-1 text-body text-dim">둘만 듣는 음성통화예요</p>
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <button type="button" onClick={call.decline} className="btn btn-quiet h-14 text-danger">
+            <button type="button" onClick={call.decline} className="btn btn-refuse h-12">
               거절
             </button>
-            <button type="button" onClick={call.accept} className="btn btn-primary h-14" autoFocus>
+            <button type="button" onClick={call.accept} className="btn btn-approve h-12" autoFocus>
               받기
             </button>
           </div>
@@ -289,15 +289,15 @@ function CallOverlay() {
         : `${st.name}님과 통화 중 ${clock(Date.now() - st.since)}`;
   return (
     <div className="call-bar fixed inset-x-0 z-40 flex justify-center px-4" role="status">
-      <div className="flex w-full max-w-md items-center gap-2 rounded-full bg-ink py-2 pr-2 pl-4 text-paper shadow-[0_10px_30px_rgba(0,0,0,.25)]">
-        <span className={`size-2.5 shrink-0 rounded-full ${st.s === "active" ? "bg-straw" : "animate-pulse bg-egg"}`} />
-        <span className="min-w-0 flex-1 truncate text-[15px]">{label}</span>
+      <div className="liquid-glass flex w-full max-w-md items-center gap-2 rounded-full py-2 pr-2 pl-4 text-foreground">
+        <span className={`size-[7px] shrink-0 rounded-full ${st.s === "active" ? "bg-online" : "anim-breathe bg-dim"}`} />
+        <span className="min-w-0 flex-1 truncate text-body">{label}</span>
         {st.s === "active" && (
-          <button type="button" onClick={call.toggleMute} className="call-btn bg-white/12" aria-pressed={call.muted} aria-label={call.muted ? "마이크 켜기" : "마이크 끄기"}>
+          <button type="button" onClick={call.toggleMute} className="call-btn focus-ring bg-glass-raised" aria-pressed={call.muted} aria-label={call.muted ? "마이크 켜기" : "마이크 끄기"}>
             <Icon name={call.muted ? "micOff" : "mic"} className="size-5" />
           </button>
         )}
-        <button type="button" onClick={call.hangup} className="call-btn bg-danger text-white" aria-label="끊기">
+        <button type="button" onClick={call.hangup} className="call-btn focus-ring bg-reject-wash text-reject" aria-label="끊기">
           <Icon name="hangup" className="size-5" />
         </button>
       </div>

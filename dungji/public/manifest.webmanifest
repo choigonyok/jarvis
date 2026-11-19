@@ -4,8 +4,8 @@
   "description": "둘이 꾸미고 돌보는 작은 방",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#e9efed",
-  "theme_color": "#e9efed",
+  "background_color": "#0c0d0f",
+  "theme_color": "#0c0d0f",
   "lang": "ko",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },

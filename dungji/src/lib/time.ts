@@ -20,17 +20,23 @@ export function daysSince(day: string, now = Date.now()) {
   return Math.floor((now - start) / 86_400_000) + 1;
 }
 
+const SEOUL = "Asia/Seoul";
+const hm = (ms: number) => new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: SEOUL });
+const monthDay = (ms: number) => new Date(ms).toLocaleDateString("ko-KR", { month: "long", day: "numeric", timeZone: SEOUL });
+
+/** 얼마 전인지(콘솔의 ago 와 같다): 방금, 3분 전, 2시간 전, 12시간이 지나면 그때(어제 21:04, 11월 7일). */
 export function ago(ms: number, now = Date.now()) {
   const m = Math.floor((now - ms) / 60_000);
   if (m < 1) return "방금";
   if (m < 60) return `${m}분 전`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d}일 전`;
-  return new Date(ms).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+  if (m < 12 * 60) return `${Math.floor(m / 60)}시간 전`;
+  return stamp(ms, now);
 }
 
-export function stamp(ms: number) {
-  return new Date(ms).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+/** 그때(콘솔의 날짜 모양): 오늘 14:02, 어제 21:04, 11월 7일 09:30 */
+export function stamp(ms: number, now = Date.now()) {
+  const day = todayKey(ms);
+  if (day === todayKey(now)) return `오늘 ${hm(ms)}`;
+  if (day === todayKey(now - 86_400_000)) return `어제 ${hm(ms)}`;
+  return `${monthDay(ms)} ${hm(ms)}`;
 }
