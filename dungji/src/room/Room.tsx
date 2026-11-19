@@ -408,7 +408,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
             }}
             aria-label="먼지 치우기"
           >
-            <ellipse cx={sx} cy={sy - 3} rx={32} ry={27} fill="transparent" />
+            <ellipse cx={sx} cy={sy - 3} rx={32} ry={29} fill="transparent" />
             {drawDirt(s.kind, sx, sy)}
           </g>
         );
