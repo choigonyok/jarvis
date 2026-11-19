@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `web` (Next.js 콘솔) | Cloudflare Workers | `jarvis.choigonyok.com` |
 | `edge` (게이트웨이) | Cloudflare Workers | `jarvis-be.choigonyok.com` |
+| `dungji` (둥지) | Cloudflare Workers + D1 + Durable Object | `dungji.choigonyok.com` |
 | 나머지 전부 (agent, browser, 각 서비스, postgres) | 맥미니의 docker compose | 공개 주소 없음 |
 
 ```
@@ -187,6 +188,31 @@ memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔
 뜨지 않는다 - 공개하지 않아도 compose 네트워크의 모든 컨테이너가 서로의 포트에 닿기 때문이다. 토큰 비교는
 상수 시간이다. 로컬 시험만 `API_TOKEN_OPTIONAL=true`(agent 는 `JARVIS_ALLOW_OPEN=true`). agent 의 `/mcp/*` 는
 기동할 때 만든 내부 토큰을 CLI 의 MCP 설정에만 실어 보내므로, 다른 컨테이너에서는 401 이다.
+
+## 둥지
+
+둥지(`dungji/`)는 콘솔과 따로 선 Worker 다. 다른 커플도 이 주소로 가입하므로 Access 뒤에 두지
+않는다. 콘솔은 일정 칸의 `둥지` 화면에서 `DUNGJI_URL` 을 프레임으로 띄운다. 들어가는 입장권은
+두 Worker 가 나눠 가진 비밀 하나로 서명하고 확인한다(콘솔 `DUNGJI_SSO_SECRET` = 둥지
+`JARVIS_SSO_SECRET`). 두 주소가 `choigonyok.com` 아래라서 프레임 안의 둥지 로그인 쿠키가 남는다.
+
+처음 한 번:
+
+```sh
+cd dungji && npm ci
+npx wrangler d1 create dungji              # 받은 id 를 dungji/wrangler.jsonc 의 database_id 에
+npx wrangler d1 migrations apply dungji --remote
+SECRET=$(openssl rand -hex 32)
+printf %s "$SECRET" | npx wrangler secret put JARVIS_SSO_SECRET
+(cd ../web && printf %s "$SECRET" | npx wrangler secret put DUNGJI_SSO_SECRET)
+npm run deploy                             # vite build → wrangler deploy (dungji.choigonyok.com)
+```
+
+그 뒤 콘솔은 평소대로 `cf:build` 뒤 배포한다(`DUNGJI_URL` 은 web/wrangler.jsonc 의 vars).
+코드만 바뀌면 `cd dungji && npm run deploy`, 표가 바뀌면 그 전에 `npm run db:remote`.
+대칭 NAT 망에서도 통화가 이어지게 하려면 Cloudflare Realtime TURN 키(`CF_TURN_KEY_ID`,
+`CF_TURN_KEY_TOKEN`)나 직접 띄운 coturn(`TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`)을 둥지
+Worker 의 비밀로 넣는다(없으면 STUN 만 쓴다).
 
 ## 로컬에서 Worker 런타임 그대로 돌려보기
 

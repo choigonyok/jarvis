@@ -65,6 +65,8 @@ const GUEST_API = [
   // The couple's space, read from the guest's side; calendar-svc and the
   // gateway refuse a guest's change to it.
   "/api/couple",
+  // 둥지의 입장권: 손님의 자리로 서명한다(손님은 둥지에서 손님 자신의 계정이다).
+  "/api/nest",
   "/api/chat",
   "/api/workout",
   "/api/notify",

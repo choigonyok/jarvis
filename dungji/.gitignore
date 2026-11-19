@@ -1,0 +1,8 @@
+node_modules
+dist
+.wrangler
+.wrangler-test
+.dev.vars
+e2e/shots
+*.log
+worker/worker-configuration.d.ts

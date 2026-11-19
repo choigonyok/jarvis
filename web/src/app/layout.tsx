@@ -1,4 +1,5 @@
 import { PhotoCraft } from "@/components/edit/photocraft";
+import { NestHost } from "@/components/nest/host";
 import { PushBridge } from "@/components/shell/push-toast";
 import { Toasts } from "@/components/shell/toasts";
 import type { Metadata, Viewport } from "next";
@@ -98,6 +99,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           {children}
           {/* The 편집 tab's editor: here rather than in the tab, so it outlives a visit to another one. */}
           <PhotoCraft />
+          {/* 둥지: here for the same reason, so a call in it outlives a look at another tab. */}
+          <NestHost />
           <PushBridge />
           <Toasts />
         </RoleProvider>

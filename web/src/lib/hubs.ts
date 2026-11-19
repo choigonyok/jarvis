@@ -26,7 +26,8 @@ export type Hub = {
  * a slot is too narrow for its word (two-syllable words, 320px). So the bar
  * names six places, by what you came for, and a place's screens sit in the
  * header where the name was: going between them costs no row, and each stays
- * one short page. 일정 is the two of us - the couple's space and its calendar;
+ * one short page. 일정 is the two of us - the couple's space, its calendar and
+ * 둥지, the room the two keep together (dungji/, framed by components/nest);
  * 더보기 is the screens you reach for only when something is up.
  */
 export const OWNER_HUBS: Hub[] = [
@@ -48,6 +49,7 @@ export const OWNER_HUBS: Hub[] = [
     screens: [
       { href: "/couple", label: "우리" },
       { href: "/calendar", label: "캘린더" },
+      { href: "/nest", label: "둥지" },
     ],
   },
   {
@@ -104,6 +106,7 @@ export const GUEST_HUBS: Hub[] = [
     screens: [
       { href: "/couple", label: "우리" },
       { href: "/calendar", label: "캘린더" },
+      { href: "/nest", label: "둥지" },
     ],
   },
   { id: "workout", label: "운동", screens: [{ href: "/workout", label: "운동" }] },
