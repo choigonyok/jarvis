@@ -315,7 +315,69 @@ export function fitsWall(room: Placed[], def: ItemDef, wall: "left" | "right", p
   return true;
 }
 
-/** 빈 자리를 찾는다: 바닥은 앞쪽 칸부터, 벽은 오른쪽 벽부터. */
+/** 바닥 물건의 그림 윤곽(상자의 육각형) */
+function silhouette(p: Placed) {
+  const def = itemDef(p.key)!;
+  const { w, d } = footprint(def, p.flip);
+  const h = Math.max(def.h, 0.05);
+  return {
+    box: { x: p.x, y: p.y, w, d },
+    poly: [
+      proj(p.x, p.y, h),
+      proj(p.x + w, p.y, h),
+      proj(p.x + w, p.y, 0),
+      proj(p.x + w, p.y + d, 0),
+      proj(p.x, p.y + d, 0),
+      proj(p.x, p.y + d, h),
+    ] as [number, number][],
+  };
+}
+
+const standing = (p: Placed) => {
+  const def = itemDef(p.key);
+  return Boolean(def && def.kind !== "wall" && !def.under);
+};
+
+/**
+ * back 의 그림 가운데 얼마가 front 에 가려지나(0~1). front 가 앞(그리는 순서로 뒤)에 있을 때만 센다.
+ * back 의 윤곽 안에 고르게 찍은 점들 가운데 front 의 윤곽 안에 드는 몫.
+ */
+export function coveredShare(front: Placed, back: Placed) {
+  if (front.id === back.id || !standing(front) || !standing(back)) return 0;
+  const f = silhouette(front);
+  const b = silhouette(back);
+  const behind = b.box.x + b.box.w <= f.box.x || b.box.y + b.box.d <= f.box.y;
+  if (!behind) return 0;
+  const xs = b.poly.map((p) => p[0]);
+  const ys = b.poly.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  let mine = 0;
+  let hidden = 0;
+  for (let i = 1; i <= 5; i++)
+    for (let j = 1; j <= 5; j++) {
+      const x = x0 + ((x1 - x0) * i) / 6;
+      const y = y0 + ((y1 - y0) * j) / 6;
+      if (!inside(x, y, b.poly)) continue;
+      mine++;
+      if (inside(x, y, f.poly)) hidden++;
+    }
+  return mine ? hidden / mine : 0;
+}
+
+/** front 가 back 을 반 넘게 가리나 */
+export const hides = (front: Placed, back: Placed) => coveredShare(front, back) >= 0.5;
+
+/** 앞의 물건에 반 넘게 가려진 물건들(화면이 위에 표시를 띄운다) */
+export function hiddenItems(room: Placed[]) {
+  const out = new Set<string>();
+  for (const back of room) if (room.some((front) => hides(front, back))) out.add(back.id);
+  return out;
+}
+
+/**
+ * 새 물건을 둘 빈자리. 벽 쪽(뒤)부터 채우고, 키 큰 물건(옷장·책장·스탠드)은 벽에 붙이며,
+ * 다른 물건을 가리거나 가려지는 자리는 피한다. 러그는 바닥 가운데로. 벽 장식은 오른쪽 벽부터.
+ */
 export function findSpot(room: Placed[], def: ItemDef): Omit<Placed, "id" | "key"> | null {
   if (def.kind === "wall") {
     for (const wall of ["right", "left"] as const)
@@ -323,13 +385,30 @@ export function findSpot(room: Placed[], def: ItemDef): Omit<Placed, "id" | "key
         if (fitsWall(room, def, wall, pos)) return { x: pos, y: 0, flip: false, wall };
     return null;
   }
-  for (let sum = 2 * GRID - 2; sum >= 0; sum--)
-    for (let x = 0; x < GRID; x++) {
-      const y = sum - x;
-      if (y < 0 || y >= GRID) continue;
-      for (const flip of [false, true]) if (fitsFloor(room, def, x, y, flip)) return { x, y, flip, wall: null };
-    }
-  return null;
+  let best: Omit<Placed, "id" | "key"> | null = null;
+  let bestScore = Infinity;
+  for (let x = 0; x < GRID; x++)
+    for (let y = 0; y < GRID; y++)
+      for (const flip of [false, true]) {
+        if (!fitsFloor(room, def, x, y, flip)) continue;
+        const { w, d } = footprint(def, flip);
+        let score: number;
+        if (def.under) score = Math.abs(x + w / 2 - GRID / 2) + Math.abs(y + d / 2 - GRID / 2);
+        else {
+          score = x + y;
+          if (def.h >= 1.4 && x !== 0 && y !== 0) score += 20;
+          // 조금이라도 가리거나 가려지는 자리는 그만큼 뒤로 미룬다(반쯤 가려지면 손가락이 앞의 가구를 누른다).
+          const me: Placed = { id: "_new", key: def.key, x, y, flip, wall: null };
+          // 돌봐야 하는 화분·어항을 가리는 것은 훨씬 더 미룬다(가려지면 물을 줄 수 없다).
+          const care = (p: Placed) => (itemDef(p.key)?.kind === "plant" || itemDef(p.key)?.kind === "tank" ? 120 : 40);
+          for (const p of room) score += care(p) * coveredShare(me, p) + care(me) * coveredShare(p, me);
+        }
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x, y, flip, wall: null };
+        }
+      }
+  return best;
 }
 
 /**

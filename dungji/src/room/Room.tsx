@@ -3,7 +3,7 @@
 import { useId, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { GRID, itemDef } from "../../shared/catalog";
 import type { HomeView, ItemView } from "../../shared/api";
-import { fitsFloor, fitsWall, footprint, occluded, type Placed } from "../../shared/rules";
+import { fitsFloor, fitsWall, footprint, hiddenItems, occluded, type Placed } from "../../shared/rules";
 import { drawDirt, drawItem, drawWall, type DrawCtx } from "./art";
 import { Flat, FlipProvider, FLOOR_FRAME, LEFT_WALL_FRAME, proj, pts, RIGHT_WALL_FRAME, shade, unproj, WALL_H } from "./iso";
 import type { Phase } from "../lib/time";
@@ -220,6 +220,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
         {...(ghost ? {} : itemA11y(e.item))}
       >
         <g transform={e.flip ? "scale(-1 1)" : undefined}>
+          {!ghost && <HitBox itemKey={e.item.key} />}
           <FlipProvider flip={e.flip}>{drawItem(e.item.key, ctx)}</FlipProvider>
         </g>
       </g>
@@ -274,7 +275,18 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
     else if (e.item.tank && e.item.tank.clarity < 40) icon = <g fill="none" stroke="#5BA7D8" strokeWidth={0.9}><circle cx={-2} cy={1} r={2} /><circle cx={2.5} cy={-2.5} r={1.5} /></g>;
     if (!icon) return null;
     return (
-      <g key={`need-${e.item.id}`} transform={`translate(${x} ${y})`} className="need-bob" pointerEvents="none">
+      <g
+        key={`need-${e.item.id}`}
+        transform={`translate(${x} ${y})`}
+        className="need-bob room-tappable"
+        role="button"
+        aria-label={`${itemDef(e.item.key)?.name ?? "물건"} 돌보기`}
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onItem?.(e.item);
+        }}
+      >
+        <circle r={22} fill="transparent" />
         <circle r={8.5} fill="rgba(255,255,255,.92)" stroke="rgba(0,0,0,.12)" />
         {icon}
       </g>
@@ -282,6 +294,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
   };
 
   const sorted = depthSort(floorItems);
+  const hidden = useMemo(() => hiddenItems(placedList), [placedList]);
 
   return (
     <svg
@@ -354,6 +367,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
                 strokeDasharray="0.14 0.08"
               />
             )}
+            <rect x={p.x} y={0.35} width={itemDef(i.key)!.w} height={1.85} fill="transparent" />
             {drawWall(i.key, p.x, ctxBase)}
           </g>
         );
@@ -394,7 +408,7 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
             }}
             aria-label="먼지 치우기"
           >
-            <polygon points={pts([[s.x, s.y, 0], [s.x + 1, s.y, 0], [s.x + 1, s.y + 1, 0], [s.x, s.y + 1, 0]])} fill="transparent" />
+            <ellipse cx={sx} cy={sy - 3} rx={32} ry={27} fill="transparent" />
             {drawDirt(s.kind, sx, sy)}
           </g>
         );
@@ -403,6 +417,64 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
       {/* 가구 */}
       {sorted.map((e) => itemNode(e))}
       {sorted.map((e) => needs(e))}
+
+      {/* 다른 가구에 가려진 물건: 위에 작은 표시(누르면 그 물건) */}
+      {sorted
+        .filter((e) => hidden.has(e.item.id))
+        .map((e) => {
+          const def = itemDef(e.item.key)!;
+          const [hx, hy] = proj(e.x + e.w / 2, e.y + e.d / 2, Math.max(def.h, 0.6) + 0.35);
+          return (
+            <g
+              key={`hidden-${e.item.id}`}
+              transform={`translate(${hx} ${hy})`}
+              className="room-tappable"
+              role="button"
+              aria-label={`가려진 ${def.name}`}
+              onPointerDown={(ev) => {
+                if (!editing) return;
+                ev.stopPropagation();
+                onSelect?.(e.item.id);
+              }}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                if (!editing) onItem?.(e.item);
+              }}
+            >
+              <circle r={22} fill="transparent" />
+              <circle r={10} fill="rgba(255,255,255,.94)" stroke="rgba(0,0,0,.18)" />
+              {def.kind === "plant" ? (
+                <path d="M0 5 C0 1 -4 -2 -5 -5 C-1 -5 1 -2 0 2 C1 -2 3 -5 6 -5 C5 -1 2 1 0 5 Z" fill="#4C7A3C" />
+              ) : def.kind === "tank" ? (
+                <g fill="#E07B39">
+                  <ellipse cx={1} cy={0} rx={4.5} ry={2.8} />
+                  <path d="M -3 0 L -6.5 -3 L -6 0 L -6.5 3 Z" />
+                </g>
+              ) : (
+                <g fill="#5B6770">
+                  <circle cx={-3.5} cy={0} r={1.4} />
+                  <circle cx={0} cy={0} r={1.4} />
+                  <circle cx={3.5} cy={0} r={1.4} />
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+      {/* 고른 물건의 자리: 물건 위에 점선으로(물건 밑의 칸은 가려진다) */}
+      {editing &&
+        [...floorItems, ...unders]
+          .filter((e) => e.item.id === selected)
+          .map((e) => (
+            <g key="sel-top" pointerEvents="none" style={{ stroke: drag && !drag.valid ? "var(--reject)" : "var(--foreground)" }}>
+              <polygon
+                points={pts([[e.x, e.y, 0], [e.x + e.w, e.y, 0], [e.x + e.w, e.y + e.d, 0], [e.x, e.y + e.d, 0]])}
+                fill="none"
+                strokeWidth={1.6}
+                strokeDasharray="5 4"
+              />
+            </g>
+          ))}
 
       {/* 가구에 가려진 먼지는 가구 위에 작은 표시로 */}
       {!editing &&
@@ -468,6 +540,18 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
       )}
     </svg>
   );
+}
+
+/**
+ * 한 칸짜리 작은 물건(방석·간식 상자·스탠드·화분)의 보이지 않는 누르는 영역: 그 칸의 상자 윤곽, 높이는 적어도 0.6.
+ * 넓은 가구(침대·소파)에는 붙이지 않는다 - 그 윤곽은 그림보다 훨씬 커서 뒤의 물건을 누르는 손가락을 가로챈다.
+ */
+function HitBox({ itemKey }: { itemKey: string }) {
+  const def = itemDef(itemKey);
+  if (!def || def.kind === "wall" || def.under || def.w * def.d !== 1) return null;
+  const h = Math.max(def.h, 0.6);
+  const { w, d } = def;
+  return <polygon points={pts([[0, 0, h], [w, 0, h], [w, 0, 0], [w, d, 0], [0, d, 0], [0, d, h]])} fill="transparent" />;
 }
 
 function Cobweb() {

@@ -71,6 +71,8 @@ export interface HomeView {
   listed?: boolean;
   /** 손님에게만: 오늘 이 방에서 더 치울 수 있는 먼지 */
   helpLeft?: number;
+  /** 주인에게만: 이웃의 마지막 방명록, 상대의 마지막 일기(새 글 점) */
+  news?: { guestbook: number | null; diary: number | null };
 }
 
 export interface Reward {
@@ -81,6 +83,8 @@ export interface Reward {
 export interface HomeResponse {
   home: HomeView;
   rewards: Reward[];
+  /** 방금 산 물건(놓인 곳): 화면이 그 물건을 고른 채 꾸미기로 들어간다 */
+  added?: { id: string; place: "room" | "storage" };
 }
 
 export interface Neighbor {

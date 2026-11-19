@@ -101,25 +101,35 @@ check("우리 머리글 없는 쓰기는 막는다", noHeader.status === 403);
 
 // ── 상점·창고 ──
 let r = await a.post("/shop/item", { key: "desk" });
-check("책상 사기 → 창고", r.status === 200 && r.home.items.some((i) => i.key === "desk" && i.place === "storage"), r);
+check("책상 사기 → 방의 빈자리에", r.status === 200 && r.home.items.some((i) => i.key === "desk" && i.place === "room") && r.added?.place === "room", r);
 check("깃털이 줄었다(340-160)", r.home.coins === 180, r.home.coins);
 const desk = r.home.items.find((i) => i.key === "desk");
+check("산 물건이 무엇인지 알려 준다(바로 꾸미기)", r.added?.id === desk.id, r.added);
 r = await a.post("/shop/item", { key: "bed_wood" });
 check("깃털이 모자라면 못 산다", r.status === 409 && r.error === "no_coins", r);
 
 sql("UPDATE couples SET coins = 5000 WHERE slug = ?", slugA);
-for (const key of ["snack_box", "cushion", "chair_wood"]) await a.post("/shop/item", { key });
-r = await a.get(`/homes/${slugA}`);
+const bought = [];
+for (const key of ["snack_box", "cushion", "chair_wood", "easel"]) {
+  const res = await a.post("/shop/item", { key });
+  if (!res.added) console.log("buy failed", key, res.status, res.message);
+  bought.push(res.added?.id);
+}
+for (const id of bought) r = await a.post(`/items/${id}/store`);
 check("창고 네 칸이 찼다", r.home.items.filter((i) => i.place === "storage").length === 4);
 r = await a.post("/shop/item", { key: "table_low" });
-check("창고가 꽉 차면 방에 바로 놓는다", r.status === 200 && r.home.items.some((i) => i.key === "table_low" && i.place === "room"), r.rewards);
 const table = r.home.items.find((i) => i.key === "table_low");
+check("창고가 차도 산 물건은 방에", r.status === 200 && table.place === "room", r.rewards);
 r = await a.post(`/items/${table.id}/store`);
 check("꽉 찬 창고에는 못 넣는다", r.status === 409 && r.error === "storage_full", r);
 r = await a.post("/storage/expand");
 check("창고 넓히기(80 깃털, 5칸)", r.status === 200 && r.home.storageSlots === 5 && r.rewards[0].delta === -80, r);
 r = await a.post(`/items/${table.id}/store`);
 check("넓힌 창고에 넣기", r.status === 200 && r.home.items.find((i) => i.id === table.id).place === "storage", r);
+r = await a.post(`/items/${desk.id}/store`);
+check("다섯 칸이 차면 더 못 넣는다", r.status === 409 && r.error === "storage_full", r);
+r = await a.post(`/items/${table.id}/place`);
+r = await a.post(`/items/${desk.id}/store`);
 r = await a.post(`/items/${desk.id}/place`);
 const placedDesk = r.home.items.find((i) => i.id === desk.id);
 check("창고에서 꺼내 빈 자리에 놓기", placedDesk.place === "room", placedDesk);
@@ -128,7 +138,7 @@ check("침대 자리로는 못 옮긴다", r.status === 409, r);
 const before = r;
 r = await a.post(`/items/${desk.id}/move`, { x: 5, y: 2, flip: true });
 check("빈 자리로 옮기고 뒤집기", r.status === 200 && r.home.items.find((i) => i.id === desk.id).flip === true, r.message ?? before.message);
-const snack = r.home.items.find((i) => i.key === "snack_box");
+const snack = r.home.items.find((i) => i.key === "snack_box" && i.place === "storage");
 const coinsBefore = r.home.coins;
 r = await a.post(`/items/${snack.id}/sell`);
 check("창고의 물건 팔기(반값)", r.status === 200 && r.home.coins === coinsBefore + 12 && !r.home.items.some((i) => i.id === snack.id), r);

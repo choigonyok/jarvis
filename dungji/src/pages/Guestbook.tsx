@@ -6,6 +6,7 @@ import { ApiError, del, get, post } from "../lib/api";
 import { linkTo } from "../lib/router";
 import { ago } from "../lib/time";
 import { useToast } from "../lib/toast";
+import { useConfirm } from "../ui/confirm";
 import { Icon } from "../ui/icons";
 
 export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; me: Me; stamp: number; compact?: boolean }) {
@@ -78,7 +79,7 @@ export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; m
               둥지 주인만 보기
             </label>
             <span className="flex-1" />
-            <button className="btn btn-approve h-11 min-h-0" disabled={busy || !body.trim()}>
+            <button className="btn btn-approve h-11" disabled={busy || !body.trim()}>
               남기기
             </button>
           </div>
@@ -111,6 +112,7 @@ export function GuestbookPanel({ home, me, stamp, compact }: { home: HomeView; m
 
 function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; meId: string; onEntries: (e: GuestEntry[]) => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState(g.reply ?? "");
 
@@ -126,7 +128,7 @@ function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; m
   }
 
   async function remove() {
-    if (!confirm("이 방명록을 지울까요?")) return;
+    if (!(await confirm({ title: "이 방명록을 지울까요?", detail: `${g.author}님이 남긴 글이 사라져요. 되돌릴 수 없어요.`, verb: "지우기" }))) return;
     try {
       const r = await del<{ entries: GuestEntry[] }>(`/guestbook/${g.id}`);
       onEntries(r.entries);
@@ -138,9 +140,9 @@ function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; m
   return (
     <li className="rounded-xl bg-glass p-4">
       <div className="flex items-center gap-2 text-ui">
-        <a className="min-w-0 truncate font-semibold underline-offset-2 hover:underline" {...linkTo(`/h/${g.slug}`)}>
-          {g.author}
-          <span className="font-normal text-dim"> {g.home}</span>
+        <a className="focus-ring -my-3 flex min-h-11 min-w-0 items-center gap-1.5 rounded-md font-semibold underline-offset-2 hover:underline" {...linkTo(`/h/${g.slug}`)}>
+          <span className="shrink-0">{g.author}</span>
+          <span className="truncate font-normal text-dim">{g.home}</span>
         </a>
         {g.secret && <Icon name="lock" className="size-3.5 shrink-0 text-dim" title="비밀글" />}
         <span className="ml-auto shrink-0 text-meta text-dim">{ago(g.at)}</span>
@@ -148,7 +150,7 @@ function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; m
       {g.hidden ? (
         <p className="mt-1.5 text-body text-dim">둥지 주인만 볼 수 있는 글이에요.</p>
       ) : (
-        <p className=" mt-1.5 text-read leading-snug break-words whitespace-pre-wrap">{g.body}</p>
+        <p className="selectable mt-1.5 text-read leading-snug break-words whitespace-pre-wrap">{g.body}</p>
       )}
       {g.reply && !replying && (
         <div className="mt-2 flex gap-2 rounded-xl bg-glass px-3 py-2">
@@ -158,19 +160,19 @@ function Entry({ g, owner, meId, onEntries }: { g: GuestEntry; owner: boolean; m
       )}
       {replying && (
         <form onSubmit={sendReply} className="mt-2 flex gap-2">
-          <input className="field h-11 min-h-0" value={reply} onChange={(e) => setReply(e.target.value)} maxLength={300} autoFocus aria-label="답글" placeholder="답글 (비우면 지워요)" />
-          <button className="btn btn-approve h-11 min-h-0 shrink-0 px-4">달기</button>
+          <input className="field h-11" value={reply} onChange={(e) => setReply(e.target.value)} maxLength={300} autoFocus aria-label="답글" placeholder="답글 (비우면 지워요)" />
+          <button className="btn btn-approve h-11 shrink-0 px-4">달기</button>
         </form>
       )}
       {(owner || g.canDelete) && !replying && (
         <div className="mt-2 flex justify-end gap-1">
           {owner && !g.hidden && (
-            <button type="button" className="h-9 rounded-lg px-2.5 text-ui text-dim" onClick={() => setReplying(true)}>
+            <button type="button" className="focus-ring h-11 rounded-lg px-3 text-ui text-dim" onClick={() => setReplying(true)}>
               {g.reply ? "답글 고치기" : "답글"}
             </button>
           )}
           {g.canDelete && (
-            <button type="button" className="h-9 rounded-lg px-2.5 text-ui text-reject" onClick={remove}>
+            <button type="button" className="focus-ring h-11 rounded-lg px-3 text-ui text-dim hover:text-reject" onClick={remove}>
               {g.authorId === meId ? "내 글 지우기" : "지우기"}
             </button>
           )}

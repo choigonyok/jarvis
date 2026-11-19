@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { Phone } from "lucide-react";
 import { Failed } from "@/components/shell/failed";
 import { useRole } from "@/components/shell/role";
 import { themeNow } from "@/lib/theme";
@@ -26,7 +27,15 @@ import { cn } from "@/lib/utils";
  * 둥지 wears the console's colours and type (dungji/src/styles.css) and its
  * theme: the one the header's switch chose goes with the ticket, and a switch
  * afterwards is told to the frame (dungji/src/lib/theme.ts).
+ *
+ * The frame tells this page two things (dungji/src/lib/embed.ts): that its
+ * home is drawn - the waiting line stays until then, so no empty page shows
+ * between - and its call's state. A call that rings, or goes on, while another
+ * tab is looked at would be in a hidden frame: a line at the top says so on
+ * every tab, and takes one back to 둥지.
  */
+
+type CallState = { state: "idle" | "incoming" | "outgoing" | "connecting" | "active"; name: string };
 
 
 let slot: HTMLElement | null = null;
@@ -54,6 +63,9 @@ export function NestHost() {
 
 type Phase = "ticket" | "loading" | "ready" | "unset" | "failed";
 
+/** An older 둥지 that does not say it is drawn: shown this long after its page has loaded. */
+const READY_FALLBACK_MS = 6_000;
+
 /** A page that has not arrived by now is not coming on this try. */
 const STALLED_MS = 25_000;
 
@@ -68,6 +80,22 @@ function Host() {
   const [src, setSrc] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("ticket");
   const [attempt, setAttempt] = useState(0);
+  const [call, setCall] = useState<CallState>({ state: "idle", name: "" });
+  const router = useRouter();
+
+  // What the frame says: that it is drawn, and its call. Only from 둥지's own origin.
+  useEffect(() => {
+    if (!src) return;
+    const origin = new URL(src).origin;
+    const hear = (e: MessageEvent) => {
+      if (e.origin !== origin) return;
+      const data = e.data as { type?: string; state?: CallState["state"]; name?: string } | null;
+      if (data?.type === "dungji:ready") setPhase("ready");
+      if (data?.type === "dungji:call" && data.state) setCall({ state: data.state, name: data.name ?? "" });
+    };
+    addEventListener("message", hear);
+    return () => removeEventListener("message", hear);
+  }, [src]);
 
   // Over the slot, following it - written to the element directly: a resize
   // is a style change, not a render.
@@ -129,40 +157,60 @@ function Host() {
 
   if (!opened) return null;
 
+  const calling = call.state !== "idle" && !here;
+
   return (
-    <div
-      ref={box}
-      // Under the header's panels and sheets (z-50) and the tab bar (z-40).
-      className="fixed z-30 bg-background"
-      style={{ visibility: here ? "visible" : "hidden" }}
-      // Away from the tab, it takes no keys and no taps (a call in it goes on).
-      inert={!here}
-    >
-      {src ? (
-        <iframe
-          key={attempt}
-          ref={frame}
-          src={src}
-          title="둥지"
-          allow="microphone; autoplay; clipboard-write; web-share"
-          onLoad={() => setPhase("ready")}
-          className={cn(
-            "block size-full border-0 transition-opacity duration-150 motion-reduce:transition-none",
-            phase === "ready" ? "opacity-100" : "opacity-0",
-          )}
-        />
+    <>
+      {calling ? (
+        <button
+          type="button"
+          onClick={() => router.push("/nest")}
+          // Above the header's glass and the tab bar, on whichever tab is open.
+          className="liquid-glass fixed left-1/2 z-50 flex h-11 -translate-x-1/2 items-center gap-2 rounded-full pr-4 pl-3.5 text-ui text-foreground focus-ring"
+          style={{ top: "calc(var(--top-space) + 0.5rem)" }}
+        >
+          <Phone aria-hidden className={cn("size-4", call.state === "incoming" && "anim-breathe")} strokeWidth={1.8} />
+          {call.state === "incoming"
+            ? `${call.name}님의 전화 · 받으러 가기`
+            : call.state === "active"
+              ? `${call.name}님과 통화 중 · 둥지로`
+              : `${call.name}님과 잇는 중 · 둥지로`}
+        </button>
       ) : null}
-      {phase === "ready" ? null : (
-        <Status
-          phase={phase}
-          onRetry={() => {
-            setPhase("ticket");
-            setSrc(null);
-            setAttempt((n) => n + 1);
-          }}
-        />
-      )}
-    </div>
+      <div
+        ref={box}
+        // Under the header's panels and sheets (z-50) and the tab bar (z-40).
+        className="fixed z-30 bg-background"
+        style={{ visibility: here ? "visible" : "hidden" }}
+        // Away from the tab, it takes no keys and no taps (a call in it goes on).
+        inert={!here}
+      >
+        {src ? (
+          <iframe
+            key={attempt}
+            ref={frame}
+            src={src}
+            title="둥지"
+            allow="microphone; autoplay; clipboard-write; web-share"
+            onLoad={() => setTimeout(() => setPhase((p) => (p === "loading" ? "ready" : p)), READY_FALLBACK_MS)}
+            className={cn(
+              "block size-full border-0 transition-opacity duration-150 motion-reduce:transition-none",
+              phase === "ready" ? "opacity-100" : "opacity-0",
+            )}
+          />
+        ) : null}
+        {phase === "ready" ? null : (
+          <Status
+            phase={phase}
+            onRetry={() => {
+              setPhase("ticket");
+              setSrc(null);
+              setAttempt((n) => n + 1);
+            }}
+          />
+        )}
+      </div>
+    </>
   );
 }
 

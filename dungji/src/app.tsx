@@ -5,6 +5,7 @@ import { CallProvider } from "./lib/call";
 import { LiveProvider } from "./lib/live";
 import { go, useLocation } from "./lib/router";
 import { ToastProvider } from "./lib/toast";
+import { ConfirmProvider } from "./ui/confirm";
 import { AuthPage } from "./pages/Auth";
 import { HomePage } from "./pages/Home";
 
@@ -35,11 +36,13 @@ export function App() {
   const slug = loc.path.startsWith("/h/") ? decodeURIComponent(loc.path.slice(3).split("/")[0]) : me.home;
   return (
     <ToastProvider>
-      <LiveProvider enabled>
-        <CallProvider partner={me.partner}>
-          <HomePage key={slug} slug={slug} me={me} onMe={setMe} />
-        </CallProvider>
-      </LiveProvider>
+      <ConfirmProvider>
+        <LiveProvider enabled>
+          <CallProvider partner={me.partner}>
+            <HomePage key={slug} slug={slug} me={me} onMe={setMe} />
+          </CallProvider>
+        </LiveProvider>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }

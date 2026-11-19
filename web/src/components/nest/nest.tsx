@@ -16,9 +16,9 @@ import { useThread } from "@/lib/use-thread";
  * mounted beside every page, so a call keeps going while another tab is
  * looked at).
  *
- * On a phone the console's tab bar is put away, as on 편집: 둥지 has its own
- * along the bottom (방, 일기, 방명록, 이웃), and a tap meant for one of those
- * must not land on a console tab. The other screens are a menu in the header away.
+ * The console's tab bar stays: 둥지's own places (방, 일기, 방명록, 이웃) are a
+ * row of words at the top of the frame, as a place's screens are words in the
+ * console's header, and the frame ends above the floating bar (pb-tabbar).
  */
 export function Nest() {
   const { proposals, connection } = useThread();
@@ -31,12 +31,12 @@ export function Nest() {
         <StandingBar pending={waiting} />
       </PageTop>
 
-      {/* Clear of the home indicator, and of the notch on a phone turned on its side. */}
-      <div className="inset-x-safe pb-safe flex min-h-0 flex-1 flex-col">
+      {/* Clear of the floating tab bar, and of the notch on a phone turned on its side. */}
+      <div className="inset-x-safe pb-tabbar flex min-h-0 flex-1 flex-col">
         <div ref={nestSlot} className="min-h-0 flex-1" />
       </div>
 
-      <TabBar pending={waiting.length} hidden />
+      <TabBar pending={waiting.length} />
     </div>
   );
 }

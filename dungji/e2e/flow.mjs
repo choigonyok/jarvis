@@ -60,6 +60,10 @@ async function open(user, path, size = { width: 390, height: 844 }) {
   await ctx.addCookies([{ name: "dj", value: user.cookie.split("=")[1], url: BASE }]);
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${user.me.name}: ${e.message}`));
+  if (process.env.DEBUG) {
+    page.on("request", (r) => r.url().includes("/api/items") && console.log(`  [${user.me.name}] →`, r.method(), r.url().replace(BASE, "")));
+    page.on("response", (r) => r.url().includes("/api/items") && console.log(`  [${user.me.name}] ←`, r.status(), r.url().replace(BASE, "")));
+  }
   await page.goto(BASE + path);
   await page.locator("h1").first().waitFor();
   return page;
@@ -93,28 +97,41 @@ check("먼지를 누르면 깃털 +3", await toastHas(a, "청소"));
 await a.waitForTimeout(300);
 check("먼지가 두 개로", (await dirtCount(a)) === 2, await dirtCount(a));
 
-// ── 상점에서 사서 창고로, 창고에서 방으로 ──
+// ── 상점에서 사면 방에 놓이고 바로 고른 채 꾸미기 ──
+// 방이 메뉴 줄 위로 넘어갈 만큼 내린 채로 상점을 연다: 사고 나면 방이 다시 보이는 데까지 올라와야 한다.
+// (작은 폰 높이에서만 그만큼 내려가므로 이 대목만 화면을 낮춘다.)
+await a.setViewportSize({ width: 390, height: 560 });
+const hiddenBefore = await a.evaluate(() => {
+  const shop = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("상점"));
+  window.scrollBy(0, shop.getBoundingClientRect().top - 70);
+  const nav = document.querySelector('nav[aria-label="둥지 메뉴"]').getBoundingClientRect();
+  return document.querySelector(".sky").getBoundingClientRect().top < nav.bottom;
+});
+check("(준비) 상점을 열 때 방 위쪽이 화면 밖에 있다", hiddenBefore);
 await a.getByRole("button", { name: "상점" }).click();
 const card = a.locator("li", { hasText: "낮은 탁자" });
 await card.getByRole("button", { name: "사기" }).click();
-check("사면 창고에 넣었다고 알린다", await toastHas(a, "창고에 넣었어요"));
-await a.getByRole("button", { name: "닫기" }).click();
-check("창고 1/4", await a.getByRole("button", { name: "창고 1/4" }).isVisible());
-await a.getByRole("button", { name: "창고 1/4" }).click();
-await a.getByRole("button", { name: "방에 두기" }).click();
-await a.waitForTimeout(400);
-await a.getByRole("button", { name: "닫기" }).click();
+check("사면 방에 놓았다고 알린다", await toastHas(a, "방에 놓았어요"));
+check("상점이 닫히고 꾸미기가 열린다", await visible(a.getByRole("button", { name: "다 꾸몄어요" })));
 let state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
 const table = state.items.find((i) => i.key === "table_low");
 check("탁자가 방에 놓였다", table?.place === "room", table);
-check("방에 탁자가 그려진다", (await a.locator(`[data-item="${table.id}"]`).count()) === 1);
-
-// ── 꾸미기: 끌어서 옮기기, 화살표로 옮기기 ──
-await a.getByRole("button", { name: "꾸미기" }).click();
 const node = a.locator(`[data-item="${table.id}"]`);
-await node.dispatchEvent("pointerdown", { pointerId: 1, isPrimary: true, button: 0, pointerType: "mouse" });
+check("산 탁자가 골라져 있다", (await node.getAttribute("aria-pressed")) === "true");
+// 꾸미기로 들어가며 방과 옮기기 줄이 한 화면에 들어오게 부드럽게 옮긴다: 멈춘 뒤에 잰다.
+// (시트를 닫는 뒤로가기가 그 스크롤을 끊거나 상점을 연 자리로 되돌리면 방 위쪽이 메뉴 줄 아래로 숨는다.)
+await a.waitForTimeout(900);
+const framed = await a.evaluate(() => {
+  const nav = document.querySelector('nav[aria-label="둥지 메뉴"]').getBoundingClientRect();
+  const room = document.querySelector(".sky").getBoundingClientRect();
+  const done = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("다 꾸몄어요")).getBoundingClientRect();
+  return { navBottom: Math.round(nav.bottom), roomTop: Math.round(room.top), doneBottom: Math.round(done.bottom), vh: innerHeight };
+});
+check("산 뒤 방 전체와 옮기기 줄이 한 화면에 보인다", framed.roomTop >= framed.navBottom && framed.doneBottom <= framed.vh, framed);
+await a.setViewportSize({ width: 390, height: 844 });
 await a.waitForTimeout(200);
-check("누르면 고른다", (await node.getAttribute("aria-pressed")) === "true");
+
+// ── 꾸미기: 끌어서, 화살표 버튼으로, 키보드로 ──
 const target = { x: 2, y: 5 };
 const free = !state.items.some((i) => i.place === "room" && i.x === target.x && i.y === target.y);
 const pt = (gx, gy) =>
@@ -126,26 +143,49 @@ const pt = (gx, gy) =>
     const q = p.matrixTransform(svg.getScreenCTM());
     return { x: q.x, y: q.y };
   }, [gx, gy]);
-const from = await pt(table.x + 0.5, table.y + 0.5);
+// 탁자의 윗면 가운데(높이 0.37)를 잡아, 목표 칸 가운데에 놓는다
+// 화면에서 높이 h 만큼 위 = 바닥 좌표를 (-h, -h) 옮긴 자리
+const top = await pt(table.x + 0.5 - 0.37, table.y + 0.5 - 0.37);
+const from = { x: top.x, y: top.y };
 const to = await pt(target.x + 0.5, target.y + 0.5);
-await a.mouse.move(from.x, from.y - 6);
+await a.mouse.move(from.x, from.y);
 await a.mouse.down();
-for (let k = 1; k <= 8; k++) await a.mouse.move(from.x + ((to.x - from.x) * k) / 8, from.y - 6 + ((to.y - from.y) * k) / 8);
+for (let k = 1; k <= 8; k++) await a.mouse.move(from.x + ((to.x - from.x) * k) / 8, from.y + ((to.y - from.y) * k) / 8);
 await a.mouse.up();
 await a.waitForTimeout(600);
 state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
 const moved = state.items.find((i) => i.id === table.id);
 check("끌어서 옮긴다", free && moved.x === target.x && moved.y === target.y, { moved, target });
-await a.locator(`[data-item="${table.id}"]`).focus();
-await a.keyboard.press("ArrowRight");
+await a.getByRole("button", { name: "오른쪽 아래로" }).click();
 await a.waitForTimeout(600);
 state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
-check("화살표로 한 칸 옮긴다", state.items.find((i) => i.id === table.id).x === target.x + 1, state.items.find((i) => i.id === table.id));
+check("화살표 버튼으로 한 칸(오른쪽 아래 = x+1)", state.items.find((i) => i.id === table.id).x === target.x + 1, state.items.find((i) => i.id === table.id));
+await a.locator(`[data-item="${table.id}"]`).focus();
+await a.keyboard.press("ArrowLeft");
+await a.waitForTimeout(600);
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+check("키보드 화살표로 한 칸", state.items.find((i) => i.id === table.id).x === target.x, state.items.find((i) => i.id === table.id));
+
+// ── 창고에 넣었다가 꺼내면 다시 고른 채 꾸미기 ──
+await a.getByRole("button", { name: "창고에 넣기" }).click();
+await a.waitForTimeout(500);
 await a.getByRole("button", { name: "다 꾸몄어요" }).click();
+check("창고 1/4", await visible(a.getByRole("button", { name: "창고 1/4" })));
+await a.getByRole("button", { name: "창고 1/4" }).click();
+await a.getByRole("button", { name: "방에 두기" }).click();
+check("꺼내면 바로 꾸미기", await visible(a.getByRole("button", { name: "다 꾸몄어요" })));
+await a.getByRole("button", { name: "다 꾸몄어요" }).click();
+
+// ── 가구를 누르면 옮기기·창고에 넣기 시트 ──
+await a.locator(`[data-item="${table.id}"]`).focus();
+await a.keyboard.press("Enter");
+check("가구 시트", await visible(a.getByRole("dialog", { name: "낮은 탁자" })));
+await a.getByRole("button", { name: "닫기" }).click();
 
 // ── 화분 물 주기 ──
 const tulip = state.items.find((i) => i.key === "plant_tulip");
 db.prepare("UPDATE items SET state = ? WHERE id = ?").run(JSON.stringify({ water: 10, growth: 20, dryAt: null, t: Date.now() }), tulip.id);
+await a.waitForTimeout(300);
 await a.reload();
 await a.getByRole("button", { name: "물 주기" }).first().click();
 check("목마른 화분에 물 주기 +2", await toastHas(a, "물 주기"));

@@ -93,7 +93,7 @@ export function NeighborsPanel() {
               <li key={n.slug}>
                 <a className="block rounded-xl bg-glass p-4 transition-colors hover:bg-glass" {...linkTo(`/h/${n.slug}`)}>
                   <div className="flex items-start gap-2">
-                    <p className=" min-w-0 flex-1 truncate text-heading leading-tight font-semibold">{n.name}</p>
+                    <p className="min-w-0 flex-1 truncate text-heading leading-tight font-semibold">{n.name}</p>
                     <span className="shrink-0 pt-1 text-meta text-dim">{ago(n.activeAt)}</span>
                   </div>
                   <p className="text-ui text-dim">{n.members.join(", ")}</p>

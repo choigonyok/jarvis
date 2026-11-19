@@ -4,6 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { IceInit, LiveMessage } from "../../shared/api";
 import { get } from "./api";
+import { tellParent } from "./embed";
 import { useLive } from "./live";
 import { useToast } from "./toast";
 import { Icon } from "../ui/icons";
@@ -233,6 +234,11 @@ export function CallProvider({ partner, children }: { partner: { id: string; nam
       }),
     [cleanup, end, flushRemoteIce, live],
   );
+
+  // 콘솔 안이면 통화 상태를 콘솔에 알린다: 다른 탭을 보는 중에도 전화가 온 것, 통화 중인 것이 콘솔 위에 뜬다.
+  useEffect(() => {
+    tellParent({ type: "dungji:call", state: state.s, name: "name" in state ? state.name : "" });
+  }, [state]);
 
   // 창을 닫으면 상대에게 끊었다고 알린다.
   useEffect(() => {

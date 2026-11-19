@@ -2,9 +2,14 @@
 
 import {
   Archive,
+  ArrowDownLeft,
+  ArrowDownRight,
+  ArrowUpLeft,
+  ArrowUpRight,
   Armchair,
   BookOpen,
   BrushCleaning,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -39,6 +44,10 @@ import {
 
 const ICONS: Record<string, LucideIcon> = {
   feather: Feather,
+  upLeft: ArrowUpLeft,
+  upRight: ArrowUpRight,
+  downLeft: ArrowDownLeft,
+  downRight: ArrowDownRight,
   phone: Phone,
   hangup: PhoneOff,
   mic: Mic,
@@ -61,6 +70,7 @@ const ICONS: Record<string, LucideIcon> = {
   fish: Fish,
   home: House,
   book: BookOpen,
+  calendar: CalendarDays,
   chat: MessageSquare,
   people: Users,
   x: X,

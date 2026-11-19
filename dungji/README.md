@@ -69,14 +69,16 @@ npm run dev                   # 화면만 고칠 때: http://localhost:5180 (API
 npm test                                   # 규칙 단위 시험
 npm run check                              # 타입
 # 아래는 wrangler dev 를 --persist-to .wrangler-test 로 띄운 뒤
-node --experimental-sqlite e2e/api.mjs     # API 96가지(jarvis 입장권 포함)
-node --experimental-sqlite e2e/flow.mjs    # 화면 조작 33가지(통화 포함, 크롬). 끝에 webkit 을 주면 사파리 엔진으로
+node --experimental-sqlite e2e/api.mjs     # API 98가지(jarvis 입장권 포함)
+node --experimental-sqlite e2e/flow.mjs    # 화면 조작 38가지(통화 포함, 크롬). 끝에 webkit 을 주면 사파리 엔진으로(통화 빼고 29가지)
 node --experimental-sqlite e2e/ui.mjs      # 폰·패드·컴퓨터, 낮·밤, 밝은·어두운 화면 촬영 → e2e/shots
 # 콘솔 안의 둥지: 로컬 콘솔을 DUNGJI_URL=http://localhost:8788 과 같은 비밀로 띄운 뒤
 JARVIS=http://localhost:3301 node --experimental-sqlite e2e/jarvis.mjs
 ```
 
 시간이 지나야 생기는 상태(먼지, 마른 화분, 배고픈 물고기)는 시험이 로컬 D1 파일을 직접 고쳐 앞당겨요. 통화 시험은 크롬의 가짜 마이크로 두 창을 실제로 이어서, 상대 소리 트랙이 재생되는지까지 봐요.
+
+`wrangler dev` 가 떠 있는 동안 `vite build` 를 다시 하면 Worker 가 D1 파일 잠금(`SQLITE_BUSY_RECOVERY`)으로 죽을 수 있어요. 빌드를 먼저 하고 Worker 를 새로 띄운 뒤 시험을 돌려요.
 
 ## 배포
 

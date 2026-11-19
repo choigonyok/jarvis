@@ -8,6 +8,7 @@ import { stamp } from "../lib/time";
 import { useToast } from "../lib/toast";
 import { FishThumb, ItemThumb, ThemeThumb } from "../room/Thumb";
 import { Feathers, Icon } from "../ui/icons";
+import { useConfirm } from "../ui/confirm";
 import { Sheet } from "../ui/sheet";
 import { stageName, type HomeActions } from "./Home";
 
@@ -47,16 +48,16 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
         </span>
       }
     >
-      <div className="-mx-5 mb-3 flex gap-1.5 overflow-x-auto px-5 pb-1" role="tablist" aria-label="상점 칸">
+      <div className="scroll-row -mx-5 mb-3 flex gap-1.5 overflow-x-auto px-5 pb-1" role="tablist" aria-label="상점 칸">
         {SHOP_TABS.map(([t, name]) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`focus-ring h-9 shrink-0 rounded-full border px-3.5 text-ui ${tab === t ? "border-edge bg-glass-raised font-medium text-foreground" : "border-transparent text-dim hover:text-foreground"}`}>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`focus-ring h-11 shrink-0 rounded-full border px-4 text-ui ${tab === t ? "border-edge bg-glass-raised font-medium text-foreground" : "border-transparent text-dim hover:text-foreground"}`}>
             {name}
           </button>
         ))}
       </div>
 
       {tab !== "fish" && tab !== "theme" && (
-        <p className="mb-3 text-aside text-dim">{full ? "창고가 꽉 차서 산 물건은 방의 빈자리에 바로 놓여요." : "산 물건은 창고에 들어가요. 창고에서 꺼내 방에 두세요."}</p>
+        <p className="mb-3 text-aside text-dim">산 물건은 방의 빈자리에 놓이고, 바로 옮길 수 있어요.{full ? "" : " 방이 꽉 차면 창고로 가요."}</p>
       )}
 
       {tab === "fish" ? (
@@ -122,7 +123,10 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
               <p className="mt-1 text-body leading-tight font-semibold">{d.name}</p>
               <p className="mt-0.5 text-aside leading-snug text-dim">{d.blurb}</p>
               <Price n={d.price} coins={coins} />
-              <button type="button" disabled={coins < d.price} onClick={() => void actions.act("/shop/item", { key: d.key })} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
+              <button type="button" disabled={coins < d.price} onClick={async () => {
+                  const r = await actions.act("/shop/item", { key: d.key });
+                  if (r?.added?.place === "room") actions.arrange(r.added.id);
+                }} className="btn btn-approve mt-2 h-11 w-full text-ui">
                 {coins < d.price ? "깃털이 모자라요" : "사기"}
               </button>
             </li>
@@ -139,7 +143,7 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
   const slots = home.storageSlots ?? 4;
   const stored = home.items.filter((i) => i.place === "storage");
   const coins = home.coins ?? 0;
-  const [selling, setSelling] = useState<string | null>(null);
+  const confirm = useConfirm();
   const price = expandPrice(slots);
 
   return (
@@ -156,19 +160,29 @@ export function StorageSheet({ home, actions, onClose }: { home: HomeView; actio
                 <ItemThumb itemKey={item.key} view={item} className="h-16 w-full" />
                 <p className="mt-1 text-body leading-tight font-semibold">{def.name}</p>
                 {fish > 0 && <p className="text-meta text-dim">물고기 {fish}마리와 함께</p>}
-                <button type="button" onClick={() => void actions.act(`/items/${item.id}/place`)} className="btn btn-approve mt-2 h-10 min-h-0 w-full text-ui">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await actions.act(`/items/${item.id}/place`);
+                    if (r) actions.arrange(item.id);
+                  }}
+                  className="btn btn-approve mt-2 h-11 w-full text-ui"
+                >
                   방에 두기
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selling !== item.id) return setSelling(item.id);
-                    setSelling(null);
-                    void actions.act(`/items/${item.id}/sell`);
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `${josa(def.name, "을", "를")} 팔까요?`,
+                      detail: `깃털 ${sellPrice(def.price)}개를 받고 창고에서 사라져요.${fish > 0 ? ` 안의 물고기 ${fish}마리도 보내요.` : ""} 되돌릴 수 없어요.`,
+                      verb: "팔기",
+                    });
+                    if (ok) void actions.act(`/items/${item.id}/sell`);
                   }}
-                  className={`btn mt-1.5 h-10 min-h-0 w-full text-ui ${selling === item.id ? "btn-refuse" : "btn-pill"}`}
+                  className="btn btn-pill mt-1.5 h-11 w-full text-ui"
                 >
-                  {selling === item.id ? (fish > 0 ? "물고기도 보내요. 팔까요?" : "정말 팔까요?") : <>팔기 <Feathers n={sellPrice(def.price)} /></>}
+                  팔기 <Feathers n={sellPrice(def.price)} />
                 </button>
               </li>
             );
@@ -220,7 +234,7 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
   const item = home.items.find((i) => i.id === itemId);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [releasing, setReleasing] = useState<string | null>(null);
+  const confirm = useConfirm();
   if (!item) return null;
   const def = itemDef(item.key)!;
 
@@ -298,11 +312,16 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
                       if (r) setRenaming(null);
                     }}
                   >
-                    <input className="field h-10 min-h-0 py-1" value={name} onChange={(e) => setName(e.target.value)} maxLength={8} autoFocus aria-label="물고기 이름" />
-                    <button className="btn btn-approve h-10 min-h-0 px-3 text-ui">저장</button>
+                    <input className="field h-11 py-1" value={name} onChange={(e) => setName(e.target.value)} maxLength={8} autoFocus aria-label="물고기 이름" />
+                    <button className="btn btn-approve h-11 px-3 text-ui">저장</button>
                   </form>
                 ) : (
-                  <button type="button" className="text-left text-body font-semibold" onClick={() => (setRenaming(f.id), setName(f.name))}>
+                  <button
+                    type="button"
+                    className="focus-ring min-h-11 min-w-11 text-left text-body font-semibold"
+                    aria-label={`${f.name} 이름 바꾸기`}
+                    onClick={() => (setRenaming(f.id), setName(f.name))}
+                  >
                     {f.name} <Icon name="pencil" className="inline size-3.5 text-dim" />
                   </button>
                 )}
@@ -313,19 +332,51 @@ export function CareSheet({ home, itemId, actions, onClose }: { home: HomeView; 
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  if (releasing !== f.id) return setReleasing(f.id);
-                  setReleasing(null);
-                  void actions.act(`/fish/${f.id}`, undefined, "DELETE");
+                onClick={async () => {
+                  const ok = await confirm({ title: `${josa(f.name, "을", "를")} 보내 줄까요?`, detail: "어항에서 사라지고 깃털은 돌아오지 않아요. 되돌릴 수 없어요.", verb: "보내 주기" });
+                  if (ok) void actions.act(`/fish/${f.id}`, undefined, "DELETE");
                 }}
-                className={`focus-ring h-10 shrink-0 rounded-lg px-2.5 text-aside ${releasing === f.id ? "bg-reject-wash text-reject" : "text-dim hover:text-reject"}`}
+                className="focus-ring h-11 shrink-0 rounded-lg px-2.5 text-aside text-dim hover:text-reject"
               >
-                {releasing === f.id ? "보낼까요?" : "보내 주기"}
+                보내 주기
               </button>
             </li>
           ))}
         </ul>
       )}
+    </Sheet>
+  );
+}
+
+// ── 가구 하나 ────────────────────────────────────────────────────
+
+export function ItemSheet({ home, itemId, actions, onClose }: { home: HomeView; itemId: string; actions: HomeActions; onClose: () => void }) {
+  const item = home.items.find((i) => i.id === itemId);
+  if (!item) return null;
+  const def = itemDef(item.key)!;
+  return (
+    <Sheet open onClose={onClose} title={def.name}>
+      <div className="flex items-center gap-4">
+        <ItemThumb itemKey={item.key} view={item} className="h-24 w-28 shrink-0" />
+        <p className="min-w-0 flex-1 text-body text-dim">{def.blurb}</p>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button type="button" className="btn btn-approve h-12" onClick={() => actions.arrange(item.id)}>
+          <Icon name="decorate" className="size-[18px]" />
+          옮기기
+        </button>
+        <button
+          type="button"
+          className="btn btn-raised h-12"
+          onClick={async () => {
+            const r = await actions.act(`/items/${item.id}/store`);
+            if (r) onClose();
+          }}
+        >
+          <Icon name="box" className="size-[18px]" />
+          창고에 넣기
+        </button>
+      </div>
     </Sheet>
   );
 }

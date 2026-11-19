@@ -70,6 +70,19 @@ const kept = await page.locator('iframe[title="둥지"]').evaluate((el) => el.da
 check("다른 탭에 다녀와도 같은 둥지 화면(다시 열지 않아 통화가 이어진다)", kept === "kept", kept);
 check("둥지 화면은 하나만 있다", (await page.locator('iframe[title="둥지"]').count()) === 1);
 
+// 다른 탭을 보는 중에 전화가 오면 콘솔 위에 띠가 뜨고, 누르면 둥지로 간다
+const nestFrame = page.frames().find((f) => f.url().includes(":8788"));
+await page.getByRole("link", { name: "캘린더", exact: true }).first().click();
+await page.waitForURL("**/calendar");
+await nestFrame.evaluate(() => window.parent.postMessage({ type: "dungji:call", state: "incoming", name: "바다" }, "http://localhost:3301"));
+const banner = page.getByRole("button", { name: /바다님의 전화/ });
+check("다른 탭에서도 전화가 온 것이 보인다", await visible(banner, 5000));
+await banner.click();
+await page.waitForURL("**/nest");
+check("띠를 누르면 둥지로 간다", page.url().endsWith("/nest"));
+await nestFrame.evaluate(() => window.parent.postMessage({ type: "dungji:call", state: "idle", name: "" }, "http://localhost:3301"));
+check("둥지에서는 띠가 없다", !(await banner.isVisible().catch(() => false)));
+
 const me = await page.evaluate(async (base) => {
   const r = await fetch(`${base}/api/nest/ticket`);
   return { status: r.status, url: (await r.json()).url };

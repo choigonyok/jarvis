@@ -11,6 +11,7 @@ import {
   fitsFloor,
   fitsWall,
   harvestPlant,
+  hiddenItems,
   occluded,
   HOUR,
   newPlant,
@@ -162,6 +163,23 @@ describe("배치", () => {
     expect(fitsWall(room, clock, "right", 4)).toBe(false);
     expect(fitsWall(room, clock, "right", 5)).toBe(true);
     expect(fitsWall(room, clock, "left", 4, "s5")).toBe(true);
+  });
+
+  it("자동으로 놓는 물건은 벽 쪽부터, 키 큰 것은 벽에 붙고, 서로 가리지 않는다", () => {
+    const room = starterRoom();
+    const keys = ["sofa_two", "shelf_book", "tank_small", "plant_sunflower", "desk", "wardrobe", "table_low", "cushion", "cat_tower", "easel"];
+    for (const [i, key] of keys.entries()) {
+      const def = itemDef(key)!;
+      const spot = findSpot(room, def);
+      expect(spot, key).not.toBeNull();
+      // 벽 자리가 남아 있는 동안의 키 큰 것(책장·옷장)은 벽에 붙는다
+      if (key === "shelf_book" || key === "wardrobe") expect(spot!.x === 0 || spot!.y === 0, `${key} 는 벽에`).toBe(true);
+      room.push({ id: `n${i}`, key, ...spot! });
+    }
+    const hidden = hiddenItems(room);
+    // 돌봐야 하는 화분·어항은 하나도 가려지지 않는다
+    for (const p of room) if (/^(plant|tank)_/.test(p.key)) expect(hidden.has(p.id), p.key).toBe(false);
+    expect(hidden.size).toBeLessThanOrEqual(1);
   });
 
   it("빈 자리를 찾는다", () => {

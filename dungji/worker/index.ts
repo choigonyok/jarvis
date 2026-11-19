@@ -202,7 +202,7 @@ async function members(db: D1Database, coupleId: string, online: string[]): Prom
 }
 
 /** 둥지를 지금 시각으로 맞춰 화면에 보낼 모양으로 답한다. */
-async function respondHome(c: C, coupleId: string, rewards: Reward[] = []) {
+async function respondHome(c: C, coupleId: string, rewards: Reward[] = [], added?: { id: string; place: "room" | "storage" }) {
   const user = requireUser(c);
   const db = c.env.DB;
   const t = now();
@@ -234,7 +234,18 @@ async function respondHome(c: C, coupleId: string, rewards: Reward[] = []) {
     visits: { today: visitsToday?.n ?? 0, recent: recent.results },
     helpLeft: owner ? undefined : Math.max(0, LIMIT.helpClean - (mine?.helped ?? 0)),
   });
-  return c.json({ home: view, rewards });
+  if (owner) {
+    // 화면이 '새 글' 점을 찍으려고 보는 마지막 때: 이웃의 방명록, 상대의 일기
+    const [gb, diary] = await db.batch([
+      db.prepare("SELECT MAX(created_at) AS at FROM guestbook WHERE home_id = ?").bind(couple.id),
+      db.prepare("SELECT MAX(updated_at) AS at FROM diary WHERE couple_id = ? AND author_id <> ?").bind(couple.id, user.id),
+    ]);
+    view.news = {
+      guestbook: (gb.results[0] as { at: number | null } | undefined)?.at ?? null,
+      diary: (diary.results[0] as { at: number | null } | undefined)?.at ?? null,
+    };
+  }
+  return c.json({ home: view, rewards, ...(added ? { added } : {}) });
 }
 
 /** 내 둥지와 그 안의 물건 하나(지금 시각으로 맞춘 뒤). */
@@ -662,13 +673,12 @@ app.post("/shop/item", async (c) => {
   const state = await tick(c.env.DB, couple, t);
   const stored = state.items.filter((i) => i.place === "storage").length;
   let where: { place: "room" | "storage"; x: number; y: number; flip: boolean; wall: "left" | "right" | null };
-  if (stored < couple.storage_slots) where = { place: "storage", x: 0, y: 0, flip: false, wall: null };
-  else {
-    // 창고가 꽉 차면 방에 바로 놓는다.
-    const spot = findSpot(placed(state.items), def);
-    if (!spot) fail(409, "storage_full", "창고도 방도 꽉 찼어요. 창고를 넓히거나 물건을 팔아 주세요.");
-    where = { place: "room", ...spot };
-  }
+  // 산 물건은 방의 빈자리(벽 쪽부터, 아무것도 가리지 않는 곳)에 바로 놓는다. 방이 차면 창고로.
+  const spot = findSpot(placed(state.items), def);
+  if (spot) where = { place: "room", ...spot };
+  else if (stored < couple.storage_slots) where = { place: "storage", x: 0, y: 0, flip: false, wall: null };
+  else fail(409, "storage_full", "방도 창고도 꽉 찼어요. 창고를 넓히거나 물건을 팔아 주세요.");
+  const newItemId = newId();
   const itemState =
     def.kind === "plant" ? newPlant(t, plantDef(def.key)!) : def.kind === "tank" ? ({ clarity: 100, t } satisfies TankState) : null;
   await write(c.env.DB, [
@@ -677,7 +687,7 @@ app.post("/shop/item", async (c) => {
       `INSERT INTO items (id, couple_id, key, place, x, y, flip, wall, state, stored_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      newId(),
+      newItemId,
       couple.id,
       def.key,
       where.place,
@@ -691,9 +701,12 @@ app.post("/shop/item", async (c) => {
     ),
   ]);
   notify(c, couple.id, "home");
-  return respondHome(c, couple.id, [
-    { delta: -def.price, reason: where.place === "storage" ? `${josa(def.name, "을", "를")} 창고에 넣었어요` : `창고가 꽉 차서 ${josa(def.name, "을", "를")} 방에 놓았어요` },
-  ]);
+  return respondHome(
+    c,
+    couple.id,
+    [{ delta: -def.price, reason: where.place === "room" ? `${josa(def.name, "을", "를")} 방에 놓았어요` : `방이 꽉 차서 ${josa(def.name, "을", "를")} 창고에 넣었어요` }],
+    { id: newItemId, place: where.place },
+  );
 });
 
 app.post("/shop/fish", async (c) => {

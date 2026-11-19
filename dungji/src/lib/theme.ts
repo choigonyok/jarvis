@@ -2,10 +2,10 @@
 // 처음 열 때는 입장권 주소의 ?theme= 로, 그 뒤 바뀌면 콘솔이 보내는 말(postMessage)로.
 // 혼자 열면(이웃 커플) 기기의 설정을 따른다. 고른 적 없으면 밤이다(콘솔과 같다).
 
+import { EMBEDDED, PARENTS } from "./embed";
+
 type Theme = "dark" | "light";
 const KEY = "dungji:theme";
-/** 테마를 알려 줄 수 있는 곳: 콘솔과, 시험하는 이 기기의 콘솔 */
-const PARENTS = /^(https:\/\/jarvis\.choigonyok\.com|http:\/\/localhost(:\d+)?)$/;
 
 const BAR: Record<Theme, string> = { dark: "#0c0d0f", light: "#f9fafb" };
 
@@ -25,7 +25,7 @@ function remember(theme: Theme) {
 }
 
 export function initTheme() {
-  const embedded = window.self !== window.top;
+  const embedded = EMBEDDED;
   const params = new URLSearchParams(location.search);
   const given = params.get("theme");
   if (isTheme(given)) {
