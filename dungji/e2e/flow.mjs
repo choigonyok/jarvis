@@ -176,6 +176,63 @@ await a.getByRole("button", { name: "방에 두기" }).click();
 check("꺼내면 바로 꾸미기", await visible(a.getByRole("button", { name: "다 꾸몄어요" })));
 await a.getByRole("button", { name: "다 꾸몄어요" }).click();
 
+// ── 꾸미기 밖에서 길게 누르면 들어 올려 옮기고, 꾸미기 중엔 고르지 않은 물건도 처음 누른 채로 끈다 ──
+const taken = (items, ignore) => {
+  const set = new Set();
+  const size = { bed_wood: [2, 3], table_low: [1, 1], lamp_floor: [1, 1], plant_tulip: [1, 1] };
+  for (const i of items) {
+    if (i.place !== "room" || i.wall || i.id === ignore || !size[i.key]) continue;
+    const [w, d] = i.flip ? [...size[i.key]].reverse() : size[i.key];
+    for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < d; dy++) set.add(`${i.x + dx},${i.y + dy}`);
+  }
+  return set;
+};
+/** 한 칸짜리 물건 옆의 빈 칸 */
+const besideFree = (item, items) => {
+  const busy = taken(items, item.id);
+  return [[1, 0], [0, 1], [-1, 0], [0, -1]].map(([dx, dy]) => ({ x: item.x + dx, y: item.y + dy })).find((c) => c.x >= 0 && c.y >= 0 && c.x < 7 && c.y < 7 && !busy.has(`${c.x},${c.y}`));
+};
+/** 마우스로 (바닥 칸 가운데) a → b 끌기. hold 만큼 누른 채 기다렸다가 움직인다. */
+const dragCell = async (from, to, hold = 0) => {
+  const p = await pt(from.x + 0.5, from.y + 0.5);
+  const q = await pt(to.x + 0.5, to.y + 0.5);
+  await a.mouse.move(p.x, p.y);
+  await a.mouse.down();
+  if (hold) await a.waitForTimeout(hold);
+  for (let k = 1; k <= 8; k++) await a.mouse.move(p.x + ((q.x - p.x) * k) / 8, p.y + ((q.y - p.y) * k) / 8);
+  await a.mouse.up();
+  await a.waitForTimeout(600);
+};
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+const lamp = state.items.find((i) => i.key === "lamp_floor");
+const lampTo = besideFree(lamp, state.items);
+await dragCell(lamp, lampTo, 700);
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+const lampNow = state.items.find((i) => i.id === lamp.id);
+check("꾸미기 밖에서 길게 누르면 들어 올려 옮긴다", lampNow.x === lampTo.x && lampNow.y === lampTo.y, { lampNow, lampTo });
+check("길게 눌러 옮기면 그 물건을 고른 채 꾸미기", (await visible(a.getByRole("button", { name: "다 꾸몄어요" }), 2000)) && (await a.locator(`[data-item="${lamp.id}"]`).getAttribute("aria-pressed")) === "true");
+const tulip0 = state.items.find((i) => i.key === "plant_tulip");
+const tulipTo = besideFree(tulip0, state.items);
+await dragCell(tulip0, tulipTo);
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+const tulipNow = state.items.find((i) => i.id === tulip0.id);
+check("꾸미기 중 고르지 않은 물건도 처음 누른 채로 끌어 옮긴다", tulipNow.x === tulipTo.x && tulipNow.y === tulipTo.y, { tulipNow, tulipTo });
+// 빈 바닥을 눌렀다 떼면 고른 것을 놓을 뿐, 물건이 그리로 옮겨 가지 않는다
+const busyNow = taken(state.items);
+const empty = [...Array(49).keys()].map((n) => ({ x: n % 7, y: Math.floor(n / 7) })).reverse().find((c) => !busyNow.has(`${c.x},${c.y}`) && !(c.x >= 3 && c.x <= 4 && c.y >= 3 && c.y <= 4));
+const ep = await pt(empty.x + 0.5, empty.y + 0.5);
+await a.mouse.click(ep.x, ep.y);
+await a.waitForTimeout(600);
+const afterTap = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+check(
+  "빈 바닥을 누르면 고른 것만 놓는다(물건이 순간이동하지 않는다)",
+  afterTap.items.every((i) => {
+    const b4 = state.items.find((x) => x.id === i.id);
+    return b4.x === i.x && b4.y === i.y;
+  }) && (await a.locator('.room-svg [aria-pressed="true"]').count()) === 0,
+);
+await a.getByRole("button", { name: "다 꾸몄어요" }).click();
+
 // ── 가구를 누르면 옮기기·창고에 넣기 시트 ──
 await a.locator(`[data-item="${table.id}"]`).focus();
 await a.keyboard.press("Enter");
@@ -231,8 +288,10 @@ await a.getByRole("link", { name: new RegExp(`달빛 다락방 ${tag}`) }).first
 await a.locator("h1", { hasText: `달빛 다락방 ${tag}` }).waitFor();
 check("이웃 둥지로 놀러 간다", a.url().includes(moon.me.home));
 await a.getByRole("link", { name: "우리 둥지", exact: true }).click();
+await a.getByPlaceholder("둥지나 사람 이름").waitFor();
+check("우리 둥지로 돌아오면 보던 이웃 칸이 다시 열린다", a.url().includes(slug) && a.url().includes("tab=neighbors"), a.url());
+await a.getByRole("button", { name: "우리 방" }).first().click();
 await a.locator("h1", { hasText: `숲속 둥지 ${tag}` }).waitFor();
-check("우리 둥지로 돌아온다", a.url().includes(slug));
 
 // ── 음성통화 ──
 if (ENGINE === "chromium") {

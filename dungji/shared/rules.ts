@@ -367,10 +367,35 @@ export function coveredShare(front: Placed, back: Placed) {
 /** front 가 back 을 반 넘게 가리나 */
 export const hides = (front: Placed, back: Placed) => coveredShare(front, back) >= 0.5;
 
-/** 앞의 물건에 반 넘게 가려진 물건들(화면이 위에 표시를 띄운다) */
+/** 러그의 그림 가운데 그 위에 선 물건들(윤곽을 모두 합친 것)에 덮이는 몫(0~1). 선 물건은 늘 러그 위에 그려진다. */
+export function rugCovered(rug: Placed, room: Placed[]) {
+  const def = itemDef(rug.key);
+  if (!def?.under) return 0;
+  const { w, d } = footprint(def, rug.flip);
+  const flat = [proj(rug.x, rug.y, 0), proj(rug.x + w, rug.y, 0), proj(rug.x + w, rug.y + d, 0), proj(rug.x, rug.y + d, 0)] as [number, number][];
+  const fronts = room.filter(standing).map((p) => silhouette(p).poly);
+  const xs = flat.map((p) => p[0]);
+  const ys = flat.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  let mine = 0;
+  let hidden = 0;
+  for (let i = 1; i <= 6; i++)
+    for (let j = 1; j <= 6; j++) {
+      const x = x0 + ((x1 - x0) * i) / 7;
+      const y = y0 + ((y1 - y0) * j) / 7;
+      if (!inside(x, y, flat)) continue;
+      mine++;
+      if (fronts.some((poly) => inside(x, y, poly))) hidden++;
+    }
+  return mine ? hidden / mine : 0;
+}
+
+/** 앞의 물건에 반 넘게 가려진 물건들, 그 위에 선 것들에 반 넘게 덮인 러그(화면이 위에 표시를 띄운다) */
 export function hiddenItems(room: Placed[]) {
   const out = new Set<string>();
-  for (const back of room) if (room.some((front) => hides(front, back))) out.add(back.id);
+  for (const back of room) {
+    if (itemDef(back.key)?.under ? rugCovered(back, room) >= 0.5 : room.some((front) => hides(front, back))) out.add(back.id);
+  }
   return out;
 }
 

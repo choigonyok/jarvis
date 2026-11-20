@@ -163,6 +163,11 @@
   body {
     overscroll-behavior: none;
   }
+  /* 콘솔이 홈 화면 앱이면 확대 없이 넘기기만 한다(src/lib/embed.ts) */
+  html[data-app],
+  html[data-app] body {
+    touch-action: pan-x pan-y;
+  }
   .tnum {
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
@@ -317,6 +322,16 @@ body.sheet-open {
   .field::placeholder {
     color: var(--faint);
   }
+  /* 아이폰 사파리의 날짜 칸은 제 글자 폭을 고집해 width: 100% 를 넘는다(시트가 옆으로 밀린다). */
+  input.field[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    min-width: 0;
+  }
+  input.field[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+  }
   .field:focus {
     border-color: color-mix(in oklab, var(--foreground) 30%, transparent);
   }
@@ -364,6 +379,8 @@ body.sheet-open {
   }
   .sheet-body {
     overflow-y: auto;
+    /* 시트는 위아래로만 넘긴다: 넘치는 것이 생겨도 옆으로 밀리지 않게 */
+    overflow-x: hidden;
     padding: 0 20px 20px;
     overscroll-behavior: contain;
   }
@@ -485,14 +502,11 @@ body.sheet-open {
     display: block;
     width: 100%;
     height: auto;
-    /* 평소에는 방 위에서 쓸어도 화면이 내려가고, 꾸밀 때만 손가락을 방이 받는다. */
+    /* 방 위에서 쓸어도 화면이 내려간다. 물건을 잡은 손가락만 방이 받는다(src/room/Room.tsx 의 터치 처리). */
     touch-action: pan-y pinch-zoom;
     user-select: none;
     -webkit-user-select: none;
     overflow: visible;
-  }
-  .room-svg.is-editing {
-    touch-action: none;
   }
   .room-tappable,
   .dirt {

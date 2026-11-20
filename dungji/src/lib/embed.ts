@@ -19,3 +19,28 @@ export function tellParent(msg: { type: string; [k: string]: unknown }) {
   const origin = parentOrigin();
   if (origin) window.parent.postMessage(msg, origin);
 }
+
+const APP_KEY = "dungji:app";
+
+/**
+ * 콘솔이 홈 화면 앱으로 떠 있으면(입장권 주소의 ?app=1) 이 프레임 안에서도 두 손가락 확대를 막는다.
+ * 프레임 안의 손짓은 콘솔의 확대 막기(web/src/components/shell/no-zoom.tsx)에 닿지 않고,
+ * 확대는 콘솔 화면 전체를 키워 옆으로 밀리는 고장 난 화면이 된다. 브라우저에서는 확대를 그대로 둔다(콘솔과 같다).
+ */
+export function initEmbed() {
+  if (!EMBEDDED) return;
+  const params = new URLSearchParams(location.search);
+  let app = false;
+  try {
+    if (params.get("app") === "1") sessionStorage.setItem(APP_KEY, "1");
+    app = sessionStorage.getItem(APP_KEY) === "1";
+  } catch {
+    app = params.get("app") === "1";
+  }
+  if (params.has("app")) {
+    params.delete("app");
+    const rest = params.toString();
+    history.replaceState(history.state, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  }
+  if (app) document.documentElement.dataset.app = "";
+}

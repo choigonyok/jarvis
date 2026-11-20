@@ -6,7 +6,7 @@ import { api, ApiError, get } from "../lib/api";
 import { useCall } from "../lib/call";
 import { EMBEDDED, tellParent } from "../lib/embed";
 import { useLive } from "../lib/live";
-import { go, linkTo, useLocation } from "../lib/router";
+import { go, goBackTo, linkTo, useLocation } from "../lib/router";
 import { daysSince, phaseOf, todayKey } from "../lib/time";
 import { useToast } from "../lib/toast";
 import { josa } from "../lib/josa";
@@ -35,6 +35,11 @@ export interface HomeActions {
   openSheet: (s: SheetState) => void;
   /** 방에 놓인 물건 하나를 고른 채 꾸미기로 들어간다(산 물건, 창고에서 꺼낸 물건, '옮기기'). */
   arrange: (itemId: string) => void;
+}
+
+/** 방에 놓인 물건들(자리 검사용) */
+function placedIn(home: HomeView): Placed[] {
+  return home.items.filter((i) => i.place === "room").map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: i.flip, wall: i.wall }));
 }
 
 /** 이 기기에서 그 칸(방명록·일기)을 마지막으로 본 때 */
@@ -68,6 +73,11 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
   const [stamps, setStamps] = useState({ diary: 0, guestbook: 0 });
   const [, setSeenTick] = useState(0);
   const busy = useRef(false);
+  // 옮기기는 화면에서 먼저 옮기고 서버에는 차례로 보낸다: 그 줄, 보낸 수, 마지막 것의 번호, 실패했는지
+  const moves = useRef<Promise<void>>(Promise.resolve());
+  const moving = useRef(0);
+  const moveSeq = useRef(0);
+  const moveFailed = useRef(false);
   const told = useRef(false);
   const roomRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
@@ -136,8 +146,10 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     const off = live.on((m) => {
       if (m.type !== "changed" || m.by === me.id) return;
       if (m.what === "home") {
+        // 내가 쓰는 중이면 끝난 뒤에 읽는다(그사이 화면에 먼저 옮긴 물건이 되돌아가 보이지 않게)
+        const reload = () => (busy.current || moving.current ? (timer = setTimeout(reload, 400)) : void load());
         clearTimeout(timer);
-        timer = setTimeout(() => !busy.current && void load(), 250);
+        timer = setTimeout(reload, 250);
       } else {
         setStamps((s) => ({ ...s, [m.what]: Date.now() }));
         void load();
@@ -176,6 +188,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
       if (busy.current) return null;
       busy.current = true;
       try {
+        await moves.current; // 먼저 놓은 물건이 서버에 닿은 뒤에
         const r = await api<HomeResponse>(method, path, method === "DELETE" ? undefined : (body ?? {}));
         setHome(r.home);
         showRewards(r.rewards);
@@ -189,6 +202,32 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
       }
     },
     [load, showRewards, toast],
+  );
+
+  /** 물건을 옮긴다: 화면은 바로 바뀌고(놓자마자 제자리로 튀지 않게), 서버에는 놓은 차례대로 간다. */
+  const move = useCallback(
+    (item: ItemView, to: MoveTo) => {
+      setHome((h) => h && { ...h, items: h.items.map((i) => (i.id === item.id ? { ...i, x: to.x, y: to.y, flip: to.flip, wall: to.wall } : i)) });
+      const seq = ++moveSeq.current;
+      moving.current++;
+      moves.current = moves.current.then(async () => {
+        try {
+          const r = await api<HomeResponse>("POST", `/items/${item.id}/move`, to);
+          // 그사이 또 옮겼으면 마지막 답만 쓴다(중간 답으로 잠깐 되돌아가 보이지 않게)
+          if (seq === moveSeq.current) setHome(r.home);
+        } catch (e) {
+          moveFailed.current = true;
+          toast.show(e instanceof ApiError ? e.message : "옮기지 못했어요.");
+        } finally {
+          moving.current--;
+          if (!moving.current && moveFailed.current) {
+            moveFailed.current = false;
+            void load();
+          }
+        }
+      });
+    },
+    [load, toast],
   );
 
   const arrange = useCallback((itemId: string) => {
@@ -258,38 +297,39 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     else toast.show(def.name);
   }
 
-  async function move(item: ItemView, to: MoveTo) {
-    await act(`/items/${item.id}/move`, to);
-  }
-
   /** 꾸미기의 화살표: 바닥은 칸 하나, 벽 장식은 벽을 따라 하나 */
   function nudge(dx: number, dy: number) {
     if (!home || !selectedItem) return;
     const def = itemDef(selectedItem.key)!;
-    const room: Placed[] = home.items
-      .filter((i) => i.place === "room")
-      .map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: i.flip, wall: i.wall }));
+    const room = placedIn(home);
     if (def.kind === "wall") {
       const pos = selectedItem.x + dx;
       if (!fitsWall(room, def, selectedItem.wall ?? "right", pos, selectedItem.id)) return toast.show("그쪽은 막혀 있어요");
-      void move(selectedItem, { x: pos, y: 0, flip: false, wall: selectedItem.wall });
+      move(selectedItem, { x: pos, y: 0, flip: false, wall: selectedItem.wall });
       return;
     }
     const x = selectedItem.x + dx;
     const y = selectedItem.y + dy;
     if (!fitsFloor(room, def, x, y, selectedItem.flip, selectedItem.id)) return toast.show("그쪽은 막혀 있어요");
-    void move(selectedItem, { x, y, flip: selectedItem.flip, wall: null });
+    move(selectedItem, { x, y, flip: selectedItem.flip, wall: null });
+  }
+
+  /** 꾸미기의 돌리기: 그 자리에서 앞뒤를 바꾼다(넓이가 바뀌어 다른 물건과 겹치면 못 돌린다). */
+  function flip() {
+    if (!home || !selectedItem) return;
+    const def = itemDef(selectedItem.key)!;
+    if (!fitsFloor(placedIn(home), def, selectedItem.x, selectedItem.y, !selectedItem.flip, selectedItem.id))
+      return toast.show("돌리면 다른 물건과 겹쳐요. 조금 옮긴 뒤 돌려 주세요");
+    move(selectedItem, { x: selectedItem.x, y: selectedItem.y, flip: !selectedItem.flip, wall: null });
   }
 
   function switchWall() {
     if (!home || !selectedItem) return;
     const def = itemDef(selectedItem.key)!;
     const wall = selectedItem.wall === "left" ? "right" : "left";
-    const room: Placed[] = home.items
-      .filter((i) => i.place === "room")
-      .map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: i.flip, wall: i.wall }));
+    const room = placedIn(home);
     for (let pos = 0; pos + def.w <= 7; pos++)
-      if (fitsWall(room, def, wall, pos, selectedItem.id)) return void move(selectedItem, { x: pos, y: 0, flip: false, wall });
+      if (fitsWall(room, def, wall, pos, selectedItem.id)) return move(selectedItem, { x: pos, y: 0, flip: false, wall });
     toast.show("저쪽 벽에는 자리가 없어요");
   }
 
@@ -330,7 +370,15 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
         <div className="mx-auto flex h-12 max-w-page-wide items-center gap-1 px-2 lg:px-6">
           {!EMBEDDED && owner && <span className="px-2 text-title font-semibold">둥지</span>}
           {!owner && (
-            <a className="focus-ring inline-flex h-11 items-center gap-0.5 rounded-lg pr-2 pl-1 text-title text-dim" {...linkTo(`/h/${me.home}`)}>
+            <a
+              className="focus-ring inline-flex h-11 items-center gap-0.5 rounded-lg pr-2 pl-1 text-title text-dim"
+              href={`/h/${me.home}`}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                goBackTo(`/h/${me.home}`);
+              }}
+            >
               <Icon name="back" className="size-4" />
               우리 둥지
             </a>
@@ -368,6 +416,15 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
               onMove={move}
               onDirt={clean}
               onItem={tapItem}
+              onBlocked={() => toast.show("다른 물건이 있는 자리라 놓지 못했어요")}
+              onLift={
+                owner
+                  ? (id) => {
+                      setEditing(true);
+                      setSelected(id);
+                    }
+                  : undefined
+              }
               poofs={poofs}
               showNeeds={owner}
               label={`${home.name}의 방. 청결 ${home.cleanliness}퍼센트, 먼지 ${home.dirt.length}개`}
@@ -381,7 +438,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
                 item={selectedItem}
                 onNudge={nudge}
                 onSwitchWall={switchWall}
-                onFlip={() => selectedItem && act(`/items/${selectedItem.id}/move`, { x: selectedItem.x, y: selectedItem.y, flip: !selectedItem.flip, wall: selectedItem.wall })}
+                onFlip={flip}
                 onStore={async () => {
                   if (!selectedItem) return;
                   const r = await act(`/items/${selectedItem.id}/store`);
@@ -590,7 +647,7 @@ function EditBar({
             <b className="font-medium text-ink">{josa(def.name, "을", "를")}</b> 끌거나 화살표로 옮겨요.
           </>
         ) : (
-          "옮길 물건을 눌러 골라 주세요."
+          "물건을 끌어서 옮기거나, 눌러 고른 뒤 화살표로 옮겨요."
         )}
       </p>
       {def && (

@@ -1,6 +1,8 @@
-// 둥지의 방 한 칸: 벽, 바닥, 물건, 먼지, 밤의 불빛. 꾸미기 중에는 끌어서 옮긴다.
+// 둥지의 방 한 칸: 벽, 바닥, 물건, 먼지, 밤의 불빛.
+// 꾸미기 중에는 물건을 눌러 바로 끌어 옮기고, 꾸미기 밖에서는 물건을 길게 누르면 들어 올려 옮긴다.
+// 손가락이 물건을 잡은 동안만 화면이 넘어가지 않고, 빈 곳에서 쓸면 화면이 넘어간다.
 
-import { useId, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { GRID, itemDef } from "../../shared/catalog";
 import type { HomeView, ItemView } from "../../shared/api";
 import { fitsFloor, fitsWall, footprint, hiddenItems, occluded, type Placed } from "../../shared/rules";
@@ -25,6 +27,10 @@ interface Props {
   onMove?: (item: ItemView, to: MoveTo) => void;
   onDirt?: (id: string) => void;
   onItem?: (item: ItemView) => void;
+  /** 꾸미기 밖에서 물건을 길게 눌렀다: 그 물건을 고른 채 꾸미기로(손가락은 계속 그 물건을 끈다) */
+  onLift?: (id: string) => void;
+  /** 다른 물건과 겹치는 자리에 놓으려 했다(물건은 제자리로) */
+  onBlocked?: () => void;
   /** 방금 치운 먼지: 그 자리에 잠깐 퍼지는 효과 */
   poofs?: { key: string; x: number; y: number }[];
   /** 주인에게만: 목마른 화분·배고픈 물고기 표시 */
@@ -34,6 +40,30 @@ interface Props {
 
 const T = 0.18; // 벽 두께
 const SLAB = 0.32; // 바닥 두께
+const SLOP = 6; // 손가락이 이만큼(px) 움직여야 끌기, 그보다 덜 움직이고 떼면 누르기
+const HOLD_MS = 450; // 꾸미기 밖에서 물건을 이만큼 누르고 있으면 들어 올린다
+
+/** 누르고 있는 손가락 하나 */
+interface Press {
+  pointerId: number;
+  /** 누른 물건(빈 곳이면 null) */
+  id: string | null;
+  x0: number;
+  y0: number;
+  /** 잡은 자리와 물건 자리의 차이(격자 단위): 바닥 [gx, gy], 벽 [벽을 따라] */
+  grab: number[];
+  /** 움직여서 끄는 중이다 */
+  live: boolean;
+  /** 꾸미기 밖에서 길게 누르기를 기다리는 중 */
+  hold?: ReturnType<typeof setTimeout>;
+  /** 길게 눌러 들어 올렸다 */
+  lifted: boolean;
+  /** 지금 끌어 놓은 자리 */
+  to?: MoveTo;
+  valid: boolean;
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export const SKY: Record<Phase, string> = {
   dawn: "#E4DDF3",
@@ -87,10 +117,13 @@ function depthSort(list: FloorEntry[]) {
   return out;
 }
 
-export function Room({ home, phase, now, editing, selected, onSelect, onMove, onDirt, onItem, poofs = [], showNeeds, label }: Props) {
+export function Room({ home, phase, now, editing, selected, onSelect, onMove, onDirt, onItem, onLift, onBlocked, poofs = [], showNeeds, label }: Props) {
   const uid = useId().replace(/:/g, "");
   const svgRef = useRef<SVGSVGElement>(null);
-  const [drag, setDrag] = useState<{ id: string; to: MoveTo; valid: boolean; moved: boolean } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; to: MoveTo; valid: boolean } | null>(null);
+  const press = useRef<Press | null>(null);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
   const night = phase === "night";
   const ctxBase: DrawCtx = { id: uid, night, now, sky: SKY[phase] };
   const wp = WALLPAPER[home.wallpaper] ?? WALLPAPER.paper_plain;
@@ -129,69 +162,160 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
     return pt.matrixTransform(svg.getScreenCTM()!.inverse());
   }
 
-  function candidate(item: ItemView, sx: number, sy: number): { to: MoveTo; valid: boolean } | null {
+  /** 벽 장식: 화면 좌표의 오른쪽 벽·왼쪽 벽 위 자리(u 는 벽을 따라, w 는 위에서 아래로) */
+  function onWalls(sx: number, sy: number) {
+    const ur = sx / 28;
+    const ul = (sx + 196) / 28;
+    return { right: [ur, (sy - 14 * ur + 28 * WALL_H) / 28], left: [ul, (sy + 14 * ul - 98 + 28 * WALL_H) / 28] } as const;
+  }
+
+  /** 손가락이 물건의 어디를 잡았나: 끄는 동안 그 거리를 지켜 물건이 손가락 밑으로 튀지 않는다. */
+  function grabAt(item: ItemView, sx: number, sy: number): number[] {
+    if (itemDef(item.key)?.kind === "wall") return [onWalls(sx, sy)[item.wall === "left" ? "left" : "right"][0] - item.x];
+    const [gx, gy] = unproj(sx, sy);
+    return [gx - item.x, gy - item.y];
+  }
+
+  function candidate(item: ItemView, sx: number, sy: number, grab: number[]): { to: MoveTo; valid: boolean } | null {
     const def = itemDef(item.key)!;
     if (def.kind === "wall") {
-      const ur = sx / 28;
-      const wr = (sy - 14 * ur + 28 * WALL_H) / 28;
-      const ul = (sx + 196) / 28;
-      const wl = (sy + 14 * ul - 98 + 28 * WALL_H) / 28;
-      const pick = (u: number, w: number, wall: "left" | "right") => {
+      const walls = onWalls(sx, sy);
+      const pick = (wall: "left" | "right") => {
+        const [u, w] = walls[wall];
         if (u < -0.5 || u > GRID + 0.5 || w < -0.3 || w > WALL_H + 0.3) return null;
-        const pos = Math.max(0, Math.min(GRID - def.w, Math.round(u - def.w / 2)));
+        const pos = clamp(Math.round(u - grab[0]), 0, GRID - def.w);
         return { to: { x: pos, y: 0, flip: false, wall }, valid: fitsWall(placedList, def, wall, pos, item.id) };
       };
-      return sx >= 0 ? (pick(ur, wr, "right") ?? pick(ul, wl, "left")) : (pick(ul, wl, "left") ?? pick(ur, wr, "right"));
+      return sx >= 0 ? (pick("right") ?? pick("left")) : (pick("left") ?? pick("right"));
     }
     const [gx, gy] = unproj(sx, sy);
-    const flip = position(item).flip;
-    const fp = footprint(def, flip);
-    const x = Math.max(0, Math.min(GRID - fp.w, Math.round(gx - fp.w / 2)));
-    const y = Math.max(0, Math.min(GRID - fp.d, Math.round(gy - fp.d / 2)));
-    return { to: { x, y, flip, wall: null }, valid: fitsFloor(placedList, def, x, y, flip, item.id) };
+    const fp = footprint(def, item.flip);
+    const x = clamp(Math.round(gx - grab[0]), 0, GRID - fp.w);
+    const y = clamp(Math.round(gy - grab[1]), 0, GRID - fp.d);
+    return { to: { x, y, flip: item.flip, wall: null }, valid: fitsFloor(placedList, def, x, y, item.flip, item.id) };
+  }
+
+  /** 손가락(또는 마우스)을 누른다. 꾸미기 중이면 바로 잡고, 아니면 길게 누르기를 기다린다. */
+  function begin(e: RPointerEvent, item: ItemView | null) {
+    if (!e.isPrimary || e.button !== 0) return;
+    const prev = press.current;
+    if (prev?.hold) clearTimeout(prev.hold);
+    const p = svgPoint(e);
+    const pr: Press = { pointerId: e.pointerId, id: item?.id ?? null, x0: e.clientX, y0: e.clientY, grab: item ? grabAt(item, p.x, p.y) : [], live: false, lifted: false, valid: true };
+    press.current = pr;
+    if (!item) return;
+    if (editing) {
+      svgRef.current?.setPointerCapture(e.pointerId);
+      return;
+    }
+    pr.hold = setTimeout(() => {
+      if (press.current !== pr) return;
+      pr.hold = undefined;
+      pr.lifted = true;
+      try {
+        svgRef.current?.setPointerCapture(pr.pointerId);
+      } catch {
+        // 손가락이 이미 떨어졌다
+      }
+      onLift?.(item.id);
+    }, HOLD_MS);
   }
 
   function onItemDown(e: RPointerEvent, item: ItemView) {
-    if (!editing) return;
-    e.stopPropagation();
-    if (selected !== item.id) {
-      onSelect?.(item.id);
-      return;
-    }
-    svgRef.current?.setPointerCapture(e.pointerId);
-    setDrag({ id: item.id, to: position(item), valid: true, moved: false });
+    if (editing) {
+      e.stopPropagation();
+      if (selected !== item.id) onSelect?.(item.id);
+      begin(e, item);
+    } else if (onLift) begin(e, item);
   }
 
   function onMovePointer(e: RPointerEvent) {
-    if (!drag) return;
-    const item = room.find((i) => i.id === drag.id);
+    const pr = press.current;
+    if (!pr || pr.pointerId !== e.pointerId) return;
+    const far = Math.hypot(e.clientX - pr.x0, e.clientY - pr.y0) >= SLOP;
+    if (pr.hold) {
+      // 들어 올리기 전에 움직였으면 화면을 넘기는 것이다
+      if (far) {
+        clearTimeout(pr.hold);
+        press.current = null;
+      }
+      return;
+    }
+    if (!pr.live && !far) return;
+    pr.live = true;
+    if (!pr.id || (!editing && !pr.lifted)) return;
+    const item = room.find((i) => i.id === pr.id);
     if (!item) return;
     const p = svgPoint(e);
-    const c = candidate(item, p.x, p.y);
+    const c = candidate(item, p.x, p.y, pr.grab);
     if (!c) return;
-    const same = c.to.x === drag.to.x && c.to.y === drag.to.y && c.to.wall === drag.to.wall;
-    if (!same) setDrag({ id: drag.id, to: c.to, valid: c.valid, moved: true });
+    const same = pr.to && c.to.x === pr.to.x && c.to.y === pr.to.y && c.to.wall === pr.to.wall;
+    pr.to = c.to;
+    pr.valid = c.valid;
+    if (!same) setDrag({ id: item.id, to: c.to, valid: c.valid });
   }
 
-  function onUp() {
-    if (!drag) return;
-    const item = room.find((i) => i.id === drag.id);
-    const changed = item && (drag.to.x !== item.x || drag.to.y !== item.y || drag.to.wall !== item.wall);
-    if (item && drag.moved && drag.valid && changed) onMove?.(item, drag.to);
+  function onUp(e: RPointerEvent) {
+    const pr = press.current;
+    if (!pr || pr.pointerId !== e.pointerId) return;
+    if (pr.hold) clearTimeout(pr.hold);
+    press.current = null;
+    setDrag(null);
+    // 꾸미기 중 빈 곳을 눌렀다 떼면 고른 것을 놓는다(쓸어 넘긴 것은 아니다)
+    if (!pr.id) {
+      if (editing && !pr.live) onSelect?.(null);
+      return;
+    }
+    const item = room.find((i) => i.id === pr.id);
+    const to = pr.to;
+    if (!item || !to || !pr.live || (to.x === item.x && to.y === item.y && to.wall === item.wall)) return;
+    if (pr.valid) onMove?.(item, to);
+    else onBlocked?.();
+  }
+
+  function onCancel(e: RPointerEvent) {
+    const pr = press.current;
+    if (!pr || pr.pointerId !== e.pointerId) return;
+    if (pr.hold) clearTimeout(pr.hold);
+    press.current = null;
     setDrag(null);
   }
 
-  /** 꾸미기 중 빈 바닥을 누르면 고른 물건을 그리로 옮긴다. */
   function onBackgroundDown(e: RPointerEvent) {
-    if (!editing) return;
-    if (!selected) return;
-    const item = room.find((i) => i.id === selected);
-    if (!item) return;
-    const p = svgPoint(e);
-    const c = candidate(item, p.x, p.y);
-    if (c?.valid && (c.to.x !== item.x || c.to.y !== item.y || c.to.wall !== item.wall)) onMove?.(item, c.to);
-    else onSelect?.(null);
+    if (editing) begin(e, null);
   }
+
+  // 손가락이 물건을 잡았으면 화면이 넘어가지 않게 한다(꾸미기 중 물건 위에서 시작한 손짓, 길게 눌러 들어 올린 뒤).
+  // React 의 터치 처리기는 막을 수 없는(passive) 것이라 직접 단다. 빈 곳에서 시작한 손짓은 그대로 화면을 넘긴다.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const start = (e: TouchEvent) => {
+      if (editingRef.current && e.touches.length === 1 && (e.target as Element | null)?.closest?.("[data-item],[data-grab]")) e.preventDefault();
+    };
+    const move = (e: TouchEvent) => {
+      const pr = press.current;
+      if (pr && pr.id && (pr.lifted || (editingRef.current && !pr.hold))) e.preventDefault();
+    };
+    const menu = (e: Event) => e.preventDefault();
+    svg.addEventListener("touchstart", start, { passive: false });
+    svg.addEventListener("touchmove", move, { passive: false });
+    svg.addEventListener("contextmenu", menu);
+    return () => {
+      svg.removeEventListener("touchstart", start);
+      svg.removeEventListener("touchmove", move);
+      svg.removeEventListener("contextmenu", menu);
+    };
+  }, []);
+
+  // 화면을 떠나면(다른 칸, 꾸미기 끝) 기다리던 길게 누르기를 버린다
+  useEffect(
+    () => () => {
+      const pr = press.current;
+      if (pr?.hold) clearTimeout(pr.hold);
+    },
+    [],
+  );
 
   // ── 그리기 ──
   const wallRect = (frame: string, shadeAmt: number, key: string) => (
@@ -300,13 +424,13 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
     <svg
       ref={svgRef}
       viewBox="-210 -110 420 322"
-      className={`room-svg${editing ? " is-editing" : ""}`}
+      className="room-svg"
       role="group"
       aria-label={label}
       onKeyDown={onKey}
       onPointerMove={onMovePointer}
       onPointerUp={onUp}
-      onPointerCancel={() => setDrag(null)}
+      onPointerCancel={onCancel}
       onPointerDown={onBackgroundDown}
     >
       <defs>
@@ -376,12 +500,12 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
       {/* 러그 */}
       {unders.map((e) => itemNode(e))}
 
-      {/* 고른 물건의 자리 */}
+      {/* 고른 물건의 자리: 이 자리를 눌러도 그 물건을 잡는다(러그는 이 자리에 덮인다) */}
       {editing &&
         [...floorItems, ...unders]
           .filter((e) => e.item.id === selected)
           .map((e) => (
-            <g key="sel" style={drag && !drag.valid ? { fill: "color-mix(in oklab, var(--reject) 35%, transparent)", stroke: "var(--reject)" } : { fill: "color-mix(in oklab, var(--foreground) 22%, transparent)", stroke: "var(--foreground)" }}>
+            <g key="sel" data-grab="" onPointerDown={(ev) => onItemDown(ev, e.item)} style={drag && !drag.valid ? { fill: "color-mix(in oklab, var(--reject) 35%, transparent)", stroke: "var(--reject)" } : { fill: "color-mix(in oklab, var(--foreground) 22%, transparent)", stroke: "var(--foreground)" }}>
               <Flat x={e.x} y={e.y} w={e.w} d={e.d} fill="inherit" stroke="inherit" />
             </g>
           ))}
@@ -418,8 +542,8 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
       {sorted.map((e) => itemNode(e))}
       {sorted.map((e) => needs(e))}
 
-      {/* 다른 가구에 가려진 물건: 위에 작은 표시(누르면 그 물건) */}
-      {sorted
+      {/* 다른 가구에 가려진 물건, 위에 선 것들에 덮인 러그: 위에 작은 표시(누르면 그 물건) */}
+      {[...unders, ...sorted]
         .filter((e) => hidden.has(e.item.id))
         .map((e) => {
           const def = itemDef(e.item.key)!;
@@ -431,10 +555,12 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
               className="room-tappable"
               role="button"
               aria-label={`가려진 ${def.name}`}
+              data-grab=""
               onPointerDown={(ev) => {
                 if (!editing) return;
                 ev.stopPropagation();
                 onSelect?.(e.item.id);
+                begin(ev, e.item);
               }}
               onClick={(ev) => {
                 ev.stopPropagation();

@@ -9,11 +9,23 @@ const EVENT = "dungji:navigate";
 if (typeof history !== "undefined" && "scrollRestoration" in history) history.scrollRestoration = "manual";
 let shownPath = typeof location !== "undefined" ? location.pathname : "";
 
+/** 기록 칸마다 어디서 왔는지 적어 둔다(돌아가기가 뒤로 가기가 되게). */
+type Entry = { from?: string | null };
+const here = () => location.pathname + location.search;
+
 export function go(to: string, opts: { replace?: boolean } = {}) {
-  if (to === location.pathname + location.search) return;
-  history[opts.replace ? "replaceState" : "pushState"](null, "", to);
+  if (to === here()) return;
+  const from = opts.replace ? ((history.state as Entry | null)?.from ?? null) : here();
+  history[opts.replace ? "replaceState" : "pushState"]({ from } satisfies Entry, "", to);
   window.dispatchEvent(new Event(EVENT));
   if (!opts.replace) window.scrollTo({ top: 0 });
+}
+
+/** 그 주소(의 어느 칸)에서 왔으면 뒤로 간다: 보던 칸이 그대로 열린다. 아니면 그리로 간다. */
+export function goBackTo(to: string) {
+  const from = (history.state as Entry | null)?.from;
+  if (from && (from === to || from.startsWith(`${to}?`))) history.back();
+  else go(to);
 }
 
 export function useLocation() {

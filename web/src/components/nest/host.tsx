@@ -63,6 +63,11 @@ export function NestHost() {
 
 type Phase = "ticket" | "loading" | "ready" | "unset" | "failed";
 
+/** Run from the home screen (the same test as components/shell/no-zoom.tsx). */
+function standalone() {
+  return matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
 /** An older 둥지 that does not say it is drawn: shown this long after its page has loaded. */
 const READY_FALLBACK_MS = 6_000;
 
@@ -130,7 +135,9 @@ function Host() {
         if (!r.ok) return setPhase("failed");
         const { url } = (await r.json()) as { url: string };
         if (gone) return;
-        setSrc(`${url}&theme=${themeNow()}`);
+        // From the home screen, zoom is locked (components/shell/no-zoom.tsx), and a
+        // pinch inside the frame never reaches that lock: 둥지 locks its own.
+        setSrc(`${url}&theme=${themeNow()}${standalone() ? "&app=1" : ""}`);
         setPhase("loading");
       })
       .catch(() => !gone && setPhase("failed"));
@@ -148,6 +155,30 @@ function Host() {
     watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => watch.disconnect();
   }, [src]);
+
+  // A phone's keyboard comes up over this page, and the frame keeps its size:
+  // 둥지 is told how much of its bottom the keyboard covers, so a sheet in it
+  // can lift its save row above the keys (dungji/src/ui/sheet.tsx).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = box.current;
+    if (!src || !vv || !el) return;
+    const origin = new URL(src).origin;
+    let told = -1;
+    const tell = () => {
+      // Zoomed in, the visible area is small for another reason.
+      const covered = Math.abs(vv.scale - 1) > 0.01 ? 0 : Math.max(0, Math.round(el.getBoundingClientRect().bottom - (vv.offsetTop + vv.height)));
+      if (covered === told) return;
+      told = covered;
+      frame.current?.contentWindow?.postMessage({ type: "dungji:keyboard", bottom: covered }, origin);
+    };
+    vv.addEventListener("resize", tell);
+    vv.addEventListener("scroll", tell);
+    return () => {
+      vv.removeEventListener("resize", tell);
+      vv.removeEventListener("scroll", tell);
+    };
+  }, [src, opened]);
 
   useEffect(() => {
     if (phase !== "loading") return;

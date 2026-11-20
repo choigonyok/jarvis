@@ -182,6 +182,16 @@ describe("배치", () => {
     expect(hidden.size).toBeLessThanOrEqual(1);
   });
 
+  it("위에 선 물건들에 반 넘게 덮인 러그도 가려진 것으로 친다(누를 곳이 없어 표시로 고른다)", () => {
+    const rug: Placed = { id: "rug", key: "rug_round", x: 3, y: 3, flip: false, wall: null };
+    expect(hiddenItems([rug]).has("rug")).toBe(false);
+    const covered = [rug, { id: "t", key: "tank_small", x: 3, y: 4, flip: false, wall: null }, { id: "p", key: "plant_sunflower", x: 4, y: 3, flip: false, wall: null }] as Placed[];
+    expect(hiddenItems(covered).has("rug")).toBe(true);
+    // 앞쪽 한 칸만 덮이면 손가락이 닿는다
+    const front = [rug, { id: "c", key: "cushion", x: 4, y: 4, flip: false, wall: null }] as Placed[];
+    expect(hiddenItems(front).has("rug")).toBe(false);
+  });
+
   it("빈 자리를 찾는다", () => {
     const spot = findSpot(starterRoom(), itemDef("desk")!);
     expect(spot).not.toBeNull();

@@ -2,8 +2,9 @@
 // 위쪽(손잡이·제목)을 끌어내리면 닫히고, 뒤로가기는 화면을 떠나지 않고 시트만 닫으며,
 // 폰 키보드가 올라오면 시트 아래가 키보드만큼 비어 저장 줄이 키보드 위로 온다.
 
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { EMBEDDED, PARENTS } from "../lib/embed";
 import { Icon } from "./icons";
 
 // ── 뒤로가기: 열린 시트마다가 아니라 하나의 기록 칸을 시트들이 넘겨받는다 ──
@@ -78,12 +79,32 @@ function letGo(holder: Holder) {
   }, 0);
 }
 
+// 콘솔 안에서는 키보드가 콘솔 화면에 뜨고 이 화면(프레임)의 크기는 그대로라, 가린 높이를 콘솔이 알려 준다
+// (web/src/components/nest/host.tsx).
+let parentInset = 0;
+const insetListeners = new Set<() => void>();
+if (EMBEDDED)
+  window.addEventListener("message", (e) => {
+    if (!PARENTS.test(e.origin)) return;
+    const d = e.data as { type?: string; bottom?: unknown } | null;
+    if (d?.type !== "dungji:keyboard" || typeof d.bottom !== "number") return;
+    parentInset = Math.max(0, Math.round(d.bottom));
+    insetListeners.forEach((fn) => fn());
+  });
+function onParentInset(fn: () => void) {
+  insetListeners.add(fn);
+  return () => {
+    insetListeners.delete(fn);
+  };
+}
+
 /** 폰 키보드가 가린 높이(없으면 0) */
 function useKeyboardInset() {
+  const fromParent = useSyncExternalStore(onParentInset, () => parentInset, () => 0);
   const [inset, setInset] = useState(0);
   useEffect(() => {
     const vv = window.visualViewport;
-    if (!vv) return;
+    if (!vv || EMBEDDED) return;
     const update = () => setInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
@@ -93,7 +114,7 @@ function useKeyboardInset() {
       vv.removeEventListener("scroll", update);
     };
   }, []);
-  return inset;
+  return EMBEDDED ? fromParent : inset;
 }
 
 const DRAG_CLOSE = 90;
