@@ -1038,3 +1038,85 @@ func TestPausedPhones(t *testing.T) {
 		t.Fatalf("다시 받은 위치: %v %+v", err, loc)
 	}
 }
+
+// A fix or a crossing a phone stamped before the time owntracks.since gives
+// it - what it kept while it could not send - is answered as a kept report is
+// and let go. One stamped after is kept, and so are its regions whenever they
+// come, and another phone's old fixes.
+func TestStaleFixesLetGo(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw", Public: "https://gw.example/context"}, nil, quiet).Handler())
+	defer srv.Close()
+	post := func(user, pass, body string) (int, string) {
+		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(body))
+		req.SetBasicAuth(user, pass)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	kept := func(source string) int {
+		conn, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(ctx)
+		var n int
+		if err := conn.QueryRow(ctx, `select count(*) from context_raw where source = $1`, source).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	from := time.Unix(1760500000, 0)
+	if err := st.Set(ctx, sinceKey, map[string]time.Time{ownerPhone: from}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	old := `{"_type":"location","lat":37.4,"lon":127.1,"acc":10,"tst":1760499000,"batt":80}`
+	if code, body := post("phone", "pw", old); code != 200 || strings.TrimSpace(body) != "[]" {
+		t.Fatalf("쌓였던 위치: %d %q", code, body)
+	}
+	if code, _ := post("phone", "pw", `{"_type":"transition","event":"leave","desc":"집","tst":1760499500}`); code != 200 {
+		t.Fatalf("쌓였던 전환: %d", code)
+	}
+	if n := kept(ownerPhone); n != 0 {
+		t.Fatalf("기준 전의 것이 남음: %d건", n)
+	}
+	var loc Location
+	if _, err := st.Get(ctx, "location", &loc); err != store.ErrNotFound {
+		t.Fatalf("기준 전의 위치로 마지막 위치가 바뀜: %v %+v", err, loc)
+	}
+	if code, _ := post("phone", "pw", `{"_type":"waypoints","tst":1760499000,"waypoints":[]}`); code != 200 {
+		t.Fatalf("영역 목록은 언제 것이든 받는다: %d", code)
+	}
+	if n := kept(ownerPhone); n != 1 {
+		t.Fatalf("영역 목록이 남아야 함: %d건", n)
+	}
+
+	if code, body := post("phone", "pw", `{"_type":"location","lat":37.5665,"lon":126.978,"acc":10,"tst":1760500000,"batt":80}`); code != 200 {
+		t.Fatalf("기준 시각의 위치: %d %s", code, body)
+	}
+	if _, err := st.Get(ctx, "location", &loc); err != nil || loc.Lat != 37.5665 {
+		t.Fatalf("기준 뒤의 위치는 받는다: %v %+v", err, loc)
+	}
+	if code, _ := post("guest-phone", "gpw", old); code != 200 {
+		t.Fatalf("기준이 없는 상대 폰: %d", code)
+	}
+	if n := kept(guestPhone); n != 1 {
+		t.Fatalf("상대 폰의 옛 위치는 그대로 받는다: %d건", n)
+	}
+}

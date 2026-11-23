@@ -218,6 +218,19 @@ scripts/mini psql "insert into context_state (key, value, at) values ('owntracks
 scripts/mini psql "delete from context_state where key = 'owntracks.paused'"     # 다시 받기
 ```
 
+## 쌓인 위치 버리기
+
+폰이 한동안 보내지 못해 쌓아 둔 위치를 받지 않으려면(그 사이의 하루를 손으로 고쳤을 때처럼) `context_state` 의
+`owntracks.since` 에 폰마다 시각을 넣는다. 그 폰이 이 시각 전에 찍은 위치(`location`)와 영역 드나듦(`transition`)은
+`200 []` 로 답하고 아무것도 남기지 않는다 - 폰은 보낸 것으로 여겨 버린다. 그 뒤에 찍은 것, 영역 목록, 명령에 대한 답은
+평소대로 받는다. 매 보고마다 읽어서 재시작 없이 바로 적용된다. 쌓인 것이 다 들어온 뒤에는 지워도 되고, 남겨 두어도
+새 위치에는 아무 영향이 없다.
+
+```
+scripts/mini psql "insert into context_state (key, value, at) values ('owntracks.since', '{\"owntracks\":\"2026-11-23T22:02:56+09:00\"}', now()) on conflict (key) do update set value = excluded.value, at = excluded.at"
+scripts/mini psql "delete from context_state where key = 'owntracks.since'"
+```
+
 ## 출발 (실시간 버스·지하철)
 
 콘솔 출발 탭의 것(`internal/api/transit.go`, `internal/transit`). 사람마다(운영자 `transit.routes`, 손님

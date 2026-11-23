@@ -12,7 +12,9 @@
 //	                         events; its arrivals go to the guest's own inbox.
 //	                         A phone named in owntracks.paused (context_state,
 //	                         set by hand) is answered [] and nothing of its
-//	                         report is kept.
+//	                         report is kept, and so is a fix or a crossing it
+//	                         stamped before the time owntracks.since gives it
+//	                         (what it kept while it could not send).
 //	POST   /signals         {source, kind, state, at?} iOS Shortcuts, the Mac
 //	                         collector, Home Assistant (bearer: the signal token)
 //	POST   /sleep            what the phone's health store says of sleep - a
@@ -285,6 +287,14 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "JSON 을 읽지 못했습니다.")
 		return
 	}
+	if old, err := s.stale(r.Context(), source, rep); err != nil {
+		s.fail(w, "위치 수집 설정을 읽지 못했습니다", err)
+		return
+	} else if old {
+		// Answered as a kept report is: the phone lets it go.
+		writeJSON(w, http.StatusOK, []map[string]any{})
+		return
+	}
 	at := time.Unix(rep.Tst, 0)
 	if rep.Tst == 0 {
 		at = s.now()
@@ -327,6 +337,30 @@ func (s *Server) paused(ctx context.Context, phone string) (bool, error) {
 		return false, err
 	}
 	return slices.Contains(phones, phone), nil
+}
+
+// sinceKey gives, phone by phone (ownerPhone, guestPhone), the time from which
+// its fixes are taken: a location or a crossing the phone stamped earlier -
+// kept while it could not send, and sent once it can - is let go, so a day put
+// right by hand stays as it was put. Its regions and its answers are taken as
+// ever. It is set and cleared by hand - README '쌓인 위치 버리기'.
+const sinceKey = "owntracks.since"
+
+// stale is whether rep is a fix or a crossing stamped before the time
+// sinceKey gives the phone.
+func (s *Server) stale(ctx context.Context, phone string, rep report) (bool, error) {
+	if rep.Tst == 0 || (rep.Type != "location" && rep.Type != "transition") {
+		return false, nil
+	}
+	var since map[string]time.Time
+	if _, err := s.st.Get(ctx, sinceKey, &since); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	from, ok := since[phone]
+	return ok && time.Unix(rep.Tst, 0).Before(from), nil
 }
 
 // ingest moves visits and the state by one report and says what the phone
