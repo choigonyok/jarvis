@@ -1,5 +1,6 @@
 // 서버가 화면에 돌려주는 모양. 화면과 서버가 같이 읽는다.
 
+import type { Act } from "./news";
 import type { DirtKind, PlantView } from "./rules";
 
 export interface Me {
@@ -169,7 +170,8 @@ export interface IceInit {
 /** 실시간 통로(웹소켓)로 오가는 말 */
 export type LiveMessage =
   | { type: "presence"; online: string[] }
-  | { type: "changed"; what: "home" | "diary" | "guestbook"; by: string }
+  /** 둥지가 바뀌었다. acts·name: 둘 중 한 사람(name)이 우리 둥지에서 한 일(shared/news.ts) */
+  | { type: "changed"; what: "home" | "diary" | "guestbook"; by: string; acts?: Act[]; name?: string }
   | { type: "call"; from: string; fromSid: string; sdp: string; name: string }
   | { type: "answer"; from: string; fromSid: string; to: string; sdp: string }
   | { type: "ice"; from: string; fromSid: string; to: string; candidate: IceInit }

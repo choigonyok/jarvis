@@ -33,6 +33,11 @@ import { cn } from "@/lib/utils";
  * between - and its call's state. A call that rings, or goes on, while another
  * tab is looked at would be in a hidden frame: a line at the top says so on
  * every tab, and takes one back to 둥지.
+ *
+ * This page tells the frame whether it is in sight. Hidden here, 둥지 still
+ * looks open to itself, and what the other one does there meanwhile has to
+ * reach this person as a notification rather than as a line in a frame nobody
+ * sees (dungji/worker/live.ts).
  */
 
 type CallState = { state: "idle" | "incoming" | "outgoing" | "connecting" | "active"; name: string };
@@ -87,20 +92,32 @@ function Host() {
   const [attempt, setAttempt] = useState(0);
   const [call, setCall] = useState<CallState>({ state: "idle", name: "" });
   const router = useRouter();
+  const shown = here !== null;
+  const shownNow = useRef(shown);
 
   // What the frame says: that it is drawn, and its call. Only from 둥지's own origin.
+  // A frame that has just drawn is told at once whether it is in sight.
   useEffect(() => {
     if (!src) return;
     const origin = new URL(src).origin;
     const hear = (e: MessageEvent) => {
       if (e.origin !== origin) return;
       const data = e.data as { type?: string; state?: CallState["state"]; name?: string } | null;
-      if (data?.type === "dungji:ready") setPhase("ready");
+      if (data?.type === "dungji:ready") {
+        setPhase("ready");
+        frame.current?.contentWindow?.postMessage({ type: "dungji:shown", shown: shownNow.current }, origin);
+      }
       if (data?.type === "dungji:call" && data.state) setCall({ state: data.state, name: data.name ?? "" });
     };
     addEventListener("message", hear);
     return () => removeEventListener("message", hear);
   }, [src]);
+
+  // In sight or not, as the tab comes and goes.
+  useEffect(() => {
+    shownNow.current = shown;
+    if (src) frame.current?.contentWindow?.postMessage({ type: "dungji:shown", shown }, new URL(src).origin);
+  }, [src, shown]);
 
   // Over the slot, following it - written to the element directly: a resize
   // is a style change, not a render.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { itemDef, plantDef } from "../../shared/catalog";
 import type { HomeResponse, HomeView, ItemView, Me, Reward } from "../../shared/api";
+import { liveLine, UNNAMED } from "../../shared/news";
 import { fitsFloor, fitsWall, type Placed } from "../../shared/rules";
 import { api, ApiError, get } from "../lib/api";
 import { useCall } from "../lib/call";
@@ -139,12 +140,15 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     return () => clearInterval(t);
   }, []);
 
-  // 상대가 바꾼 것은 바로 다시 읽는다(우리 둥지만 실시간 통로가 있다).
+  // 상대가 바꾼 것은 바로 다시 읽고, 무엇을 했는지 한 줄로 띄운다(우리 둥지만 실시간 통로가 있다).
+  // 보고 있는 동안 한 일은 이것으로 알고, 상대의 jarvis 알림으로는 가지 않는다(worker/live.ts).
   useEffect(() => {
     if (!owner) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = live.on((m) => {
       if (m.type !== "changed" || m.by === me.id) return;
+      const line = m.acts?.length ? liveLine(m.name ?? UNNAMED, m.acts, todayKey()) : null;
+      if (line) toast.show(line);
       if (m.what === "home") {
         // 내가 쓰는 중이면 끝난 뒤에 읽는다(그사이 화면에 먼저 옮긴 물건이 되돌아가 보이지 않게)
         const reload = () => (busy.current || moving.current ? (timer = setTimeout(reload, 400)) : void load());
@@ -159,7 +163,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
       off();
       clearTimeout(timer);
     };
-  }, [owner, live, me.id, load]);
+  }, [owner, live, me.id, load, toast]);
 
   // 다시 화면으로 돌아오면 그사이 쌓인 먼지·마른 화분을 본다.
   useEffect(() => {

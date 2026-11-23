@@ -20,6 +20,35 @@ export function tellParent(msg: { type: string; [k: string]: unknown }) {
   if (origin) window.parent.postMessage(msg, origin);
 }
 
+// 콘솔은 다른 칸으로 가도 이 프레임을 숨긴 채 살려 둔다(통화가 이어지게). 그동안 이 화면은 켜져 있어도
+// 보이지 않으니, 상대가 한 일은 둥지 안이 아니라 jarvis 알림으로 가야 한다(worker/live.ts). 둥지 칸이 열려
+// 있는지는 콘솔이 알려 준다(dungji:shown). 알려 주지 않는 콘솔이면 보이는 것으로 둔다.
+let shown = true;
+const shownListeners = new Set<() => void>();
+if (EMBEDDED)
+  window.addEventListener("message", (e) => {
+    if (!PARENTS.test(e.origin)) return;
+    const d = e.data as { type?: string; shown?: unknown } | null;
+    if (d?.type !== "dungji:shown" || typeof d.shown !== "boolean" || d.shown === shown) return;
+    shown = d.shown;
+    shownListeners.forEach((fn) => fn());
+  });
+
+/** 이 화면이 지금 사람 눈에 보이나: 화면이 켜져 있고, 콘솔 안이면 둥지 칸이 열려 있다. */
+export function inSight() {
+  return document.visibilityState === "visible" && shown;
+}
+
+/** 보이는지가 바뀔 수 있을 때 */
+export function onSight(fn: () => void) {
+  shownListeners.add(fn);
+  document.addEventListener("visibilitychange", fn);
+  return () => {
+    shownListeners.delete(fn);
+    document.removeEventListener("visibilitychange", fn);
+  };
+}
+
 const APP_KEY = "dungji:app";
 
 /**

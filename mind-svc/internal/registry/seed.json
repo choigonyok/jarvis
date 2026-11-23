@@ -54,6 +54,7 @@
     "job.*": {"lane": "relay"},
     "memory.*": {"lane": "relay"},
     "mind.*": {"lane": "relay"},
+    "nest.*": {"lane": "relay", "guest": true},
     "notify.*": {"lane": "relay"},
     "policy.*": {"lane": "relay"},
     "proposal.*": {"lane": "relay"},

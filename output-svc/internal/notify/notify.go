@@ -66,6 +66,7 @@ var Categories = []Category{
 	{"job", "작업", "로그인·확인이 필요할 때, 먼저 할지 물을 때, 끝났거나 멈췄을 때"},
 	{"status", "수집·연결 이상", "카톡·카드 알림 수집이 멈췄을 때"},
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
+	{"nest", "둥지", "상대가 둥지에서 일기를 쓰거나 방을 돌봤을 때 - 둥지를 보고 있을 때는 오지 않음"},
 	{"spending", "가계부", "큰 결제, 예산, 하루 지출, 분류 묻기"},
 	{"assets", "자산", "비중 이탈, 입출금 감지, 뺀 돈이 어디로 갔는지 묻기, 하루 자산"},
 	{"memory", "자비스 기억", "자비스가 기억을 새로 저장하거나 고치거나 지울 때"},
@@ -73,12 +74,14 @@ var Categories = []Category{
 
 // GuestCategories is what the guest account is sent: their own jarvis's
 // cards, jobs and memory, their own reminders, the shared calendar as the
-// operator's side changes it, and when to leave on their own routes.
+// operator's side changes it, what the operator did in 둥지, and when to leave
+// on their own routes.
 var GuestCategories = []Category{
 	{"approval", "결재 대기", "내 jarvis 가 승인을 기다릴 때"},
 	{"remind", "때 맞춘 알림", "부탁한 리마인드, 체크리스트의 남은 것 - 방해 금지 시간에도 울림"},
 	{"job", "작업", "내 작업이 확인을 기다리거나 끝났을 때"},
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
+	{"nest", "둥지", "상대가 둥지에서 일기를 쓰거나 방을 돌봤을 때 - 둥지를 보고 있을 때는 오지 않음"},
 	{"transit", "출발", "등록한 경로의 시간대에 '슬슬 짐 싸야 해요'·'지금 나가요' - 방해 금지 시간에도 울림"},
 	{"memory", "자비스 기억", "내 jarvis 가 기억을 새로 저장하거나 고치거나 지울 때"},
 }

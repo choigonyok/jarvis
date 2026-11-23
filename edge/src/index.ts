@@ -14,6 +14,12 @@
  *   setup (context's GET track and GET owntracks/setup/guest, nothing else of
  *   context) - so a hole in the console's proxy still cannot carry a guest to
  *   the operator's money, messages, voice or phone setup.
+ * - Nest, 둥지's service binding (dungji/wrangler.jsonc, entrypoint "Nest").
+ *   One method, tell: what one of the two did in 둥지, as a notification for
+ *   the other - the operator or the guest (see tellNest). It is handed words
+ *   and whom they are for, and can leave nothing at the way in but a
+ *   notification of its one kind: no service is reached through it and
+ *   nothing is read.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
  *   /context/owntracks, /context/signals and /context/sleep (OwnTracks, iOS
@@ -377,6 +383,73 @@ export default {
 export class Internal extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
     return gateway(request, this.env, true);
+  }
+}
+
+/** What 둥지 (dungji/worker/live.ts) tells one of the two about what the other did there. */
+export interface NestNotice {
+  to: "owner" | "guest";
+  title: string;
+  body?: string;
+  /** "<둥지 user id>:<ms of the first thing done>": the same key is one notification. */
+  key: string;
+}
+
+const NEST_KEY = /^[A-Za-z0-9_-]{1,40}:\d{1,16}$/;
+
+/** 둥지's service binding: tell, and nothing else - no fetch, no service behind. */
+export class Nest extends WorkerEntrypoint<Env> {
+  async tell(notice: NestNotice): Promise<{ ok: boolean; status: number }> {
+    return tellNest(this.env, notice);
+  }
+}
+
+/** At most `max` characters, whole ones. */
+function clip(s: string, max: number): string {
+  const chars = [...s];
+  return chars.length <= max ? s : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+/**
+ * The notice as a record at the way in (input-svc POST /records), shaped as
+ * gocommon/record.FromEvent shapes any service's notification: mind passes the
+ * wording on and output-svc pushes it to whoever it is for, who can turn the
+ * category (nest) off. The guest's goes in with the guest's token, which can
+ * tell the guest something and do nothing else (input-svc envelope.ForGuest).
+ * A tap opens the 둥지 screen.
+ */
+export async function tellNest(env: Env, n: NestNotice, now = new Date()): Promise<{ ok: boolean; status: number }> {
+  const to = n?.to;
+  const title = typeof n?.title === "string" ? n.title.trim() : "";
+  const body = typeof n?.body === "string" ? n.body.trim() : "";
+  if ((to !== "owner" && to !== "guest") || !title || typeof n.key !== "string" || !NEST_KEY.test(n.key)) {
+    return { ok: false, status: 400 };
+  }
+  const token = to === "guest" ? env.JARVIS_GUEST_API_TOKEN : env.JARVIS_API_TOKEN;
+  if (!token) return { ok: false, status: 503 };
+  const record = {
+    kind: "nest.partner",
+    source: "dungji",
+    source_key: `nest:${n.key}`,
+    actor: to === "guest" ? "guest" : "dungji",
+    subject: "nest",
+    occurred_at: now.toISOString(),
+    tier: "raw",
+    schema_version: 1,
+    payload: {
+      notify: { tier: "now", title: clip(title, 80), ...(body ? { body: clip(body, 200) } : {}), url: "/nest", audience: to },
+    },
+  };
+  try {
+    const res = await env.INPUT.fetch(`${SERVICES.input.origin}/records`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(record),
+    });
+    await res.body?.cancel();
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, status: 502 };
   }
 }
 

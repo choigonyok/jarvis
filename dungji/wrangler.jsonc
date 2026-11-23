@@ -27,6 +27,9 @@
     "bindings": [{ "name": "LIVE", "class_name": "HomeLive" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HomeLive"] }],
+  // jarvis 게이트웨이의 Nest 문: 둘 중 한 사람이 한 일을 상대의 jarvis 알림으로(worker/live.ts).
+  // 같은 계정의 Worker 끼리만 닿는 바인딩이라 공개 주소가 없다(edge/src/index.ts). 게이트웨이를 먼저 배포한다.
+  "services": [{ "binding": "JARVIS", "service": "jarvis-be", "entrypoint": "Nest" }],
   "observability": { "enabled": true }
 
   // 비밀(wrangler secret put): JARVIS_SSO_SECRET(콘솔의 DUNGJI_SSO_SECRET 과 같은 값),

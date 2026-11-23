@@ -38,7 +38,8 @@
 타고 compose 이름(`agent` 등)으로 각 서비스에 닿는다.
 
 - VPC 서비스: `npx wrangler vpc service list` (jarvis-agent … jarvis-status, 터널 `5b824fd4…`)
-- 게이트웨이 배포: `cd web && npx wrangler deploy -c ../edge/wrangler.jsonc`
+- 게이트웨이 배포: `cd web && npx wrangler deploy -c ../edge/wrangler.jsonc`. 문은 셋이다: 공개 주소(폰의 문),
+  콘솔의 `Internal`, 둥지의 `Nest`('둥지' 절).
 - 게이트웨이 비밀: `JARVIS_API_TOKEN`(서비스가 확인하는 토큰, 게이트웨이에만),
   `JARVIS_EDGE_TOKEN`(콘솔이 운영자 요청에 내는 토큰, 콘솔과 게이트웨이 둘 다, 맥북 `~/.config/jarvis/edge-token`),
   `JARVIS_EDGE_GUEST_TOKEN`(콘솔이 손님 요청에 내는 토큰, 둘 다, 맥북 `~/.config/jarvis/edge-guest-token`),
@@ -210,6 +211,14 @@ npm run deploy                             # vite build → wrangler deploy (dun
 
 그 뒤 콘솔은 평소대로 `cf:build` 뒤 배포한다(`DUNGJI_URL` 은 web/wrangler.jsonc 의 vars).
 코드만 바뀌면 `cd dungji && npm run deploy`, 표가 바뀌면 그 전에 `npm run db:remote`.
+
+둘 중 한 사람이 둥지에서 한 일은 상대의 jarvis 알림으로 간다: 둥지 Worker 의 서비스 바인딩 `JARVIS` 가
+게이트웨이의 `Nest` 엔트리포인트(RPC `tell` 하나)를 부르고, 게이트웨이가 입구에 `nest.partner` 알림
+기록을 남긴다(손님 몫은 `JARVIS_GUEST_API_TOKEN` 으로). 같은 계정의 Worker 끼리만 닿는 바인딩이라
+공개 주소도 비밀도 없다. 처음 올릴 때 순서: output-svc(알림 분류 `nest` - 설정 화면에서 끄는 줄) →
+게이트웨이(`Nest` 문) → 둥지 → 콘솔(둥지 칸이 열려 있는지 프레임에 알린다 - 이게 늦으면 콘솔의 다른 칸에
+가 있는 사람도 둥지를 보고 있는 것으로 셈해 jarvis 알림을 받지 못한다). mind 는 다음에 올릴 때 레지스트리에
+`nest.*` 가 들어간다(그 전에는 모르는 종류라는 경고 한 줄뿐, 알림은 간다).
 대칭 NAT 망에서도 통화가 이어지게 하려면 Cloudflare Realtime TURN 키(`CF_TURN_KEY_ID`,
 `CF_TURN_KEY_TOKEN`)나 직접 띄운 coturn(`TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`)을 둥지
 Worker 의 비밀로 넣는다(없으면 STUN 만 쓴다).

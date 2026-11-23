@@ -10,6 +10,8 @@ export interface UserRow {
   id: string;
   login: string;
   name: string;
+  /** 이름을 정했나(jarvis 로 처음 들어온 사람은 0: 화면이 먼저 묻는다) */
+  named: number;
   couple_id: string;
 }
 
@@ -53,7 +55,7 @@ export async function sessionUser(c: Context<AppEnv>): Promise<UserRow | null> {
   const token = readCookie(c.req.header("Cookie"));
   if (!token) return null;
   return c.env.DB.prepare(
-    `SELECT u.id, u.login, u.name, u.couple_id FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.login, u.name, u.named, u.couple_id FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )
     .bind(await sha256hex(token), Date.now())

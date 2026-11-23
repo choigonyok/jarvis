@@ -340,18 +340,27 @@ func TestGuestIsTheirOwnPerson(t *testing.T) {
 }
 
 func TestGuestSeesOnlyTheirCategories(t *testing.T) {
-	memory := false
+	memory, nest := false, false
 	for _, c := range CategoriesFor(store.Guest) {
 		if c.ID == "location" || c.ID == "assets" || c.ID == "spending" {
 			t.Fatalf("운영자 전용 분류가 손님에게 보입니다: %s", c.ID)
 		}
 		memory = memory || c.ID == "memory"
+		nest = nest || c.ID == "nest"
 	}
 	if !memory {
 		t.Fatal("손님 자비스의 기억 알림을 끌 수 있어야 합니다")
 	}
 	if len(CategoriesFor(store.Owner)) != len(Categories) {
 		t.Fatal("운영자 분류가 줄었습니다")
+	}
+	// 둥지(edge 의 Nest 문)는 둘 중 한 사람이 한 일을 상대에게 알린다: 둘 다 끌 수 있어야 한다.
+	owner := false
+	for _, c := range CategoriesFor(store.Owner) {
+		owner = owner || c.ID == "nest"
+	}
+	if !nest || !owner {
+		t.Fatal("둥지 알림은 운영자와 손님 모두 끌 수 있어야 합니다")
 	}
 }
 

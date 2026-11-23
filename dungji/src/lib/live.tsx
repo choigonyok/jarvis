@@ -1,7 +1,10 @@
 // 우리 둥지의 실시간 통로: 누가 들어와 있나, 상대가 무엇을 바꿨나, 통화 신호.
+// 이 창이 사람 눈에 보이는지도 알린다(seen): 상대가 한 일을 둥지 안에 띄울지, 상대의 jarvis 알림으로
+// 보낼지를 서버가 그것으로 가른다(worker/live.ts).
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LiveMessage } from "../../shared/api";
+import { inSight, onSight } from "./embed";
 
 interface Live {
   online: string[];
@@ -34,6 +37,17 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
     let retry = 0;
     let ping: ReturnType<typeof setInterval> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // 이 연결로 마지막에 알린 '보이나'(새 연결마다 처음부터 다시 알린다)
+    let told: boolean | null = null;
+    const tellSeen = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const on = inSight();
+      if (on === told) return;
+      told = on;
+      ws.send(JSON.stringify({ type: "seen", on }));
+    };
+    const offSight = onSight(tellSeen);
 
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -42,6 +56,8 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
       ws.onopen = () => {
         retry = 0;
         setConnected(true);
+        told = null;
+        tellSeen();
         ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), 25_000);
       };
       ws.onmessage = (e) => {
@@ -82,6 +98,7 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
       stopped = true;
       clearTimeout(timer);
       clearInterval(ping);
+      offSight();
       document.removeEventListener("visibilitychange", wake);
       wsRef.current?.close();
       wsRef.current = null;

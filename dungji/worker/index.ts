@@ -62,7 +62,9 @@ import {
   type CoupleRow,
   type ItemRow,
 } from "./home";
+import { UNNAMED, type Act } from "../shared/news";
 import { HomeLive } from "./live";
+import type { JarvisDoor } from "./tell";
 import { fail, hmacHex, HttpError, inviteCode, isDay, josa, newId, sameText, text } from "./util";
 
 export { HomeLive };
@@ -71,6 +73,13 @@ export interface Env {
   DB: D1Database;
   LIVE: DurableObjectNamespace<HomeLive>;
   ASSETS: Fetcher;
+  /**
+   * jarvis 게이트웨이의 Nest 문(서비스 바인딩, edge/src/index.ts): 둘 중 한 사람이 한 일을 상대의
+   * jarvis 알림으로 보낸다(worker/live.ts). 없으면(로컬, 다른 배포) 둥지 안에만 알린다.
+   */
+  JARVIS?: JarvisDoor;
+  /** 시험용: 둥지를 떠난 뒤 상대에게 보내기까지 기다리는 밀리초(기본 30초, worker/tell.ts 의 GRACE) */
+  TELL_AFTER_MS?: string;
   /** 직접 둔 TURN 서버(예: coturn): "turn:turn.example.com:3478,turns:turn.example.com:5349" */
   TURN_URLS?: string;
   TURN_USERNAME?: string;
@@ -183,12 +192,22 @@ async function onlineOf(env: Env, coupleId: string): Promise<string[]> {
   }
 }
 
-/** 그 둥지에 들어와 있는 둘에게 '바뀌었어요'를 알린다(응답을 기다리지 않는다). */
-function notify(c: C, coupleId: string, what: "home" | "diary" | "guestbook") {
-  const by = c.get("user")?.id ?? "";
+/**
+ * 그 둥지에 들어와 있는 둘에게 '바뀌었어요'를 알린다(응답을 기다리지 않는다). acts 는 무엇을 했는지:
+ * 우리 둥지에서 둘 중 한 사람이 한 일만 상대에게 알린다(worker/live.ts). 이웃이 다녀가거나 치워 준 것,
+ * 지운 것은 알리지 않는다.
+ */
+function notify(c: C, coupleId: string, what: "home" | "diary" | "guestbook", acts: Act[] = []) {
+  const user = c.get("user");
+  const own = user?.couple_id === coupleId;
+  const body = {
+    what,
+    by: user?.id ?? "",
+    ...(own && acts.length ? { couple: coupleId, acts, name: user.named ? user.name : UNNAMED } : {}),
+  };
   c.executionCtx.waitUntil(
     liveStub(c.env, coupleId)
-      .fetch("https://live/notify", { method: "POST", body: JSON.stringify({ what, by }) })
+      .fetch("https://live/notify", { method: "POST", body: JSON.stringify(body) })
       .catch(() => undefined),
   );
 }
@@ -537,7 +556,11 @@ app.patch("/home", async (c) => {
   await c.env.DB.prepare("UPDATE couples SET name = ?, intro = ?, since = ?, listed = ? WHERE id = ?")
     .bind(next.name, next.intro, next.since, next.listed, couple.id)
     .run();
-  notify(c, couple.id, "home");
+  const acts: Act[] = [];
+  if (next.name !== couple.name) acts.push({ k: "home", field: "name" });
+  if (next.intro !== couple.intro) acts.push({ k: "home", field: "intro" });
+  if (next.since && next.since !== couple.since) acts.push({ k: "home", field: "since" });
+  notify(c, couple.id, "home", acts);
   return respondHome(c, couple.id);
 });
 
@@ -580,7 +603,7 @@ app.post("/items/:id/move", async (c) => {
     if (!fitsFloor(room, def, x, y, flip, item.id)) fail(409, "no_room", "그 자리에는 놓을 수 없어요.");
     await c.env.DB.prepare("UPDATE items SET x = ?, y = ?, flip = ? WHERE id = ?").bind(x, y, flip ? 1 : 0, item.id).run();
   }
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "decorate" }]);
   return respondHome(c, couple.id);
 });
 
@@ -590,7 +613,7 @@ app.post("/items/:id/store", async (c) => {
   await write(c.env.DB, [
     c.env.DB.prepare("UPDATE items SET place = 'storage', stored_at = ? WHERE id = ? AND place = 'room'").bind(now(), item.id),
   ]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "decorate" }]);
   return respondHome(c, couple.id);
 });
 
@@ -627,7 +650,7 @@ app.post("/items/:id/place", async (c) => {
   }
   if (def.kind === "tank") stmts.push(c.env.DB.prepare("UPDATE fish SET t = ? WHERE tank_id = ?").bind(t, item.id));
   await write(c.env.DB, stmts);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "decorate" }]);
   return respondHome(c, couple.id);
 });
 
@@ -642,7 +665,7 @@ app.post("/items/:id/sell", async (c) => {
     c.env.DB.prepare("DELETE FROM items WHERE id = ?").bind(item.id),
     ...coinStmts(c.env.DB, couple.id, price, `${def.name} 팔기`, user.id, t),
   ]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "sell", name: def.name }]);
   return respondHome(c, couple.id, [{ delta: price, reason: `${def.name} 팔기` }]);
 });
 
@@ -660,7 +683,7 @@ app.post("/storage/expand", async (c) => {
     ...coinStmts(c.env.DB, couple.id, -price, "창고 한 칸 넓히기", user.id, t),
   ]);
   mustChange(r[0]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "expand" }]);
   return respondHome(c, couple.id, [{ delta: -price, reason: "창고 한 칸 넓히기" }]);
 });
 
@@ -703,7 +726,7 @@ app.post("/shop/item", async (c) => {
       t,
     ),
   ]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "buy", name: def.name }]);
   return respondHome(
     c,
     couple.id,
@@ -730,7 +753,7 @@ app.post("/shop/fish", async (c) => {
       "INSERT INTO fish (id, couple_id, tank_id, species, name, hunger, growth, hungry_at, t, created_at) VALUES (?, ?, ?, ?, ?, 100, 0, NULL, ?, ?)",
     ).bind(newId(), couple.id, tank.id, fdef.key, fdef.name, t, t),
   ]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "fish", name: fdef.name }]);
   return respondHome(c, couple.id, [{ delta: -fdef.price, reason: `${fdef.name} 들이기` }]);
 });
 
@@ -754,7 +777,8 @@ app.post("/shop/theme", async (c) => {
   }
   stmts.push(c.env.DB.prepare(`UPDATE couples SET ${column} = ? WHERE id = ?`).bind(def.key, couple.id));
   await write(c.env.DB, stmts);
-  notify(c, couple.id, "home");
+  const worn = def.kind === "wallpaper" ? couple.wallpaper : couple.floor;
+  notify(c, couple.id, "home", worn === def.key ? [] : [{ k: "theme", part: def.kind, name: def.name }]);
   return respondHome(c, couple.id, rewards);
 });
 
@@ -773,7 +797,7 @@ app.post("/items/:id/water", async (c) => {
     ...coinStmts(c.env.DB, couple.id, REWARD.water, "물 주기", user.id, t),
   ]);
   mustChange(r[0]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "water", name: itemDef(item.key)!.name }]);
   return respondHome(c, couple.id, [{ delta: REWARD.water, reason: "물 주기" }]);
 });
 
@@ -790,7 +814,7 @@ app.post("/items/:id/harvest", async (c) => {
     ...coinStmts(c.env.DB, couple.id, pdef.reward, reason, user.id, t),
   ]);
   mustChange(r[0]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "harvest", name: itemDef(item.key)!.name, what: pdef.harvest }]);
   return respondHome(c, couple.id, [{ delta: pdef.reward, reason }]);
 });
 
@@ -806,7 +830,7 @@ app.post("/items/:id/feed", async (c) => {
   );
   const r = await write(c.env.DB, [...stmts, ...coinStmts(c.env.DB, couple.id, REWARD.feed, "먹이 주기", user.id, t)]);
   mustChange(r[0]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "feed" }]);
   return respondHome(c, couple.id, [{ delta: REWARD.feed, reason: "먹이 주기" }]);
 });
 
@@ -821,7 +845,7 @@ app.post("/items/:id/scrub", async (c) => {
     ...coinStmts(c.env.DB, couple.id, REWARD.scrub, "어항 물 갈기", user.id, t),
   ]);
   mustChange(r[0]);
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "scrub" }]);
   return respondHome(c, couple.id, [{ delta: REWARD.scrub, reason: "어항 물 갈기" }]);
 });
 
@@ -831,15 +855,17 @@ app.patch("/fish/:id", async (c) => {
   const name = text(b.name, "이름", 1, 8);
   const r = await c.env.DB.prepare("UPDATE fish SET name = ? WHERE id = ? AND couple_id = ?").bind(name, c.req.param("id"), couple.id).run();
   if (!r.meta.changes) fail(404, "no_fish", "그 물고기가 없어요.");
-  notify(c, couple.id, "home");
+  notify(c, couple.id, "home", [{ k: "naming" }]);
   return respondHome(c, couple.id);
 });
 
 app.delete("/fish/:id", async (c) => {
   const { couple } = await myHome(c);
-  const r = await c.env.DB.prepare("DELETE FROM fish WHERE id = ? AND couple_id = ?").bind(c.req.param("id"), couple.id).run();
-  if (!r.meta.changes) fail(404, "no_fish", "그 물고기가 없어요.");
-  notify(c, couple.id, "home");
+  const gone = await c.env.DB.prepare("DELETE FROM fish WHERE id = ? AND couple_id = ? RETURNING name")
+    .bind(c.req.param("id"), couple.id)
+    .first<{ name: string }>();
+  if (!gone) fail(404, "no_fish", "그 물고기가 없어요.");
+  notify(c, couple.id, "home", [{ k: "release", name: gone.name }]);
   return respondHome(c, couple.id);
 });
 
@@ -858,7 +884,7 @@ app.post("/homes/:slug/dirt/:id/clean", async (c) => {
       ...coinStmts(db, couple.id, REWARD.clean, "청소", user.id, t),
     ]);
     if (!r[0].meta.changes) fail(404, "gone", "이미 치워졌어요.");
-    notify(c, couple.id, "home");
+    notify(c, couple.id, "home", [{ k: "clean" }]);
     return respondHome(c, couple.id, [{ delta: REWARD.clean, reason: "청소" }]);
   }
   // 이웃이 치워 주면: 하루에 그 방에서 세 개까지, 깃털은 치운 사람의 둥지로.
@@ -944,18 +970,20 @@ app.put("/diary/:day", async (c) => {
   const mood = MOODS.includes(b.mood as (typeof MOODS)[number]) ? (b.mood as string) : "sun";
   const content = text(b.body, "일기", 1, 2000);
   const t = now();
-  await c.env.DB.prepare(
+  // 처음 쓴 일기면 created_at 이 지금이다(고친 것이면 처음 쓴 때 그대로).
+  const saved = await c.env.DB.prepare(
     `INSERT INTO diary (couple_id, day, author_id, mood, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (couple_id, day, author_id) DO UPDATE SET mood = excluded.mood, body = excluded.body, updated_at = excluded.updated_at`,
+     ON CONFLICT (couple_id, day, author_id) DO UPDATE SET mood = excluded.mood, body = excluded.body, updated_at = excluded.updated_at
+     RETURNING created_at`,
   )
     .bind(couple.id, day, user.id, mood, content, t, t)
-    .run();
+    .first<{ created_at: number }>();
   const rewards: Reward[] = [];
   if (day === dayKey(t) && (await claim(c.env.DB, user.id, day, "diary", 1))) {
     await write(c.env.DB, coinStmts(c.env.DB, couple.id, REWARD.diary, "오늘 일기", user.id, t));
     rewards.push({ delta: REWARD.diary, reason: "오늘 일기" });
   }
-  notify(c, couple.id, "diary");
+  notify(c, couple.id, "diary", [{ k: "diary", day, first: saved?.created_at === t }]);
   return c.json({ ...(await diaryDay(c.env.DB, couple.id, day)), rewards });
 });
 
@@ -977,7 +1005,7 @@ app.post("/diary/:day/comments", async (c) => {
   await c.env.DB.prepare("INSERT INTO diary_comments (id, couple_id, day, author_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(newId(), couple.id, day, user.id, content, now())
     .run();
-  notify(c, couple.id, "diary");
+  notify(c, couple.id, "diary", [{ k: "comment" }]);
   return c.json(await diaryDay(c.env.DB, couple.id, day));
 });
 
@@ -1074,7 +1102,7 @@ app.post("/guestbook/:id/reply", async (c) => {
     .bind(content || null, content ? user.id : null, content ? now() : null, c.req.param("id"))
     .run();
   const home = (await getCouple(c.env.DB, { id: user.couple_id }))!;
-  notify(c, home.id, "guestbook");
+  notify(c, home.id, "guestbook", content ? [{ k: "reply" }] : []);
   return c.json({ entries: await guestPage(c.env.DB, home, user, Number.MAX_SAFE_INTEGER) });
 });
 
