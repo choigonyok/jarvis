@@ -3,7 +3,7 @@
 import { fishDef, itemDef, themeDef } from "../../shared/catalog";
 import type { ItemView } from "../../shared/api";
 import { drawItem, drawWall } from "./art";
-import { FlipProvider, proj } from "./iso";
+import { proj } from "./iso";
 import { FLOORS, WALLPAPER } from "./Room";
 
 const HEIGHT: Record<string, number> = {
@@ -39,7 +39,7 @@ export function ItemThumb({ itemKey, view, className = "size-16" }: { itemKey: s
         <g>{drawWall(def.key, 0, { id: "thumb", night: false, now, sky: "#CFE6EF" })}</g>
       </svg>
     );
-  const h = def.kind === "plant" ? 1.9 : (HEIGHT[def.key] ?? 1.2);
+  const h = def.kind === "plant" ? 1.9 : (HEIGHT[def.key] ?? Math.max(def.h + 0.08, 0.3));
   const [left] = proj(0, def.d);
   const [right] = proj(def.w, 0);
   const [, bottom] = proj(def.w, def.d);
@@ -49,7 +49,7 @@ export function ItemThumb({ itemKey, view, className = "size-16" }: { itemKey: s
   const tank = view?.tank ?? (def.kind === "tank" ? { clarity: 100, capacity: 3, fish: [] } : undefined);
   return (
     <svg viewBox={`${left - pad} ${top - pad} ${right - left + pad * 2} ${bottom - top + pad * 2}`} className={className} aria-hidden>
-      <FlipProvider flip={false}>{drawItem(def.key, { id: `thumb-${view?.id ?? def.key}`, night: false, now, sky: "#CFE6EF", plant, tank })}</FlipProvider>
+      {drawItem(def.key, { id: `thumb-${view?.id ?? def.key}`, night: false, now, sky: "#CFE6EF", plant, tank })}
     </svg>
   );
 }

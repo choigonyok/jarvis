@@ -10,17 +10,19 @@ import {
   fishView,
   fitsFloor,
   fitsWall,
+  footprint,
   harvestPlant,
   hiddenItems,
-  occluded,
   HOUR,
   newPlant,
+  nextTurn,
+  occluded,
+  type Placed,
   plantView,
   spawnDirt,
   tickFish,
   tickPlant,
   tickTank,
-  type Placed,
 } from "../shared/rules";
 
 const T0 = Date.UTC(2026, 10, 20, 0, 0, 0);
@@ -87,7 +89,7 @@ describe("어항", () => {
 });
 
 const starterRoom = (): Placed[] =>
-  STARTER.map((s, i) => ({ id: `s${i}`, key: s.key, x: s.x, y: s.y, flip: Boolean(s.flip), wall: s.wall ?? null }));
+  STARTER.map((s, i) => ({ id: `s${i}`, key: s.key, x: s.x, y: s.y, turn: s.turn ?? 0, wall: s.wall ?? null }));
 
 describe("먼지", () => {
   it("세 시간마다 하나, 열두 개까지", () => {
@@ -139,22 +141,42 @@ describe("배치", () => {
     const room = starterRoom();
     for (const p of room) {
       const def = itemDef(p.key)!;
-      const ok = p.wall ? fitsWall(room, def, p.wall, p.x, p.id) : fitsFloor(room, def, p.x, p.y, p.flip, p.id);
+      const ok = p.wall ? fitsWall(room, def, p.wall, p.x, p.id) : fitsFloor(room, def, p.x, p.y, p.turn, p.id);
       expect(ok, p.key).toBe(true);
     }
   });
 
   it("러그 위에는 가구를 놓을 수 있지만 가구끼리는 겹치지 않는다", () => {
     const room = starterRoom();
-    expect(fitsFloor(room, itemDef("table_low")!, 3, 3, false)).toBe(true); // 러그 위
-    expect(fitsFloor(room, itemDef("table_low")!, 0, 2, false)).toBe(false); // 침대 자리
-    expect(fitsFloor(room, itemDef("bed_wood")!, 6, 0, false)).toBe(false); // 방 밖으로 나감
+    expect(fitsFloor(room, itemDef("table_low")!, 3, 3, 0)).toBe(true); // 러그 위
+    expect(fitsFloor(room, itemDef("table_low")!, 0, 2, 0)).toBe(false); // 침대 자리
+    expect(fitsFloor(room, itemDef("bed_wood")!, 6, 0, 0)).toBe(false); // 방 밖으로 나감
   });
 
-  it("뒤집으면 가로세로가 바뀐다", () => {
+  it("90도·270도 돌리면 가로세로가 바뀌고, 반 바퀴는 그대로다", () => {
     const sofa = itemDef("sofa_two")!; // 2 × 1
-    expect(fitsFloor([], sofa, 6, 0, false)).toBe(false);
-    expect(fitsFloor([], sofa, 6, 0, true)).toBe(true);
+    expect(footprint(sofa, 0)).toEqual({ w: 2, d: 1 });
+    expect(footprint(sofa, 1)).toEqual({ w: 1, d: 2 });
+    expect(footprint(sofa, 2)).toEqual({ w: 2, d: 1 });
+    expect(footprint(sofa, 3)).toEqual({ w: 1, d: 2 });
+    expect(fitsFloor([], sofa, 6, 0, 0)).toBe(false);
+    expect(fitsFloor([], sofa, 6, 0, 1)).toBe(true);
+    expect(fitsFloor([], sofa, 6, 0, 2)).toBe(false);
+    expect(fitsFloor([], sofa, 6, 0, 3)).toBe(true);
+  });
+
+  it("꾸미기의 돌리기: 옆으로 돌릴 자리가 없으면 반 바퀴", () => {
+    const sofa = itemDef("sofa_two")!;
+    const me: Placed = { id: "s", key: "sofa_two", x: 0, y: 0, turn: 0, wall: null };
+    expect(nextTurn([me], sofa, me, 1)).toEqual({ turn: 1, half: false });
+    expect(nextTurn([me], sofa, me, -1)).toEqual({ turn: 3, half: false });
+    // 바로 왼쪽 아래 칸에 물건이 있으면 세로로 세울 수 없다
+    const box: Placed = { id: "b", key: "snack_box", x: 0, y: 1, turn: 0, wall: null };
+    expect(nextTurn([me, box], sofa, me, 1)).toEqual({ turn: 2, half: true });
+    // 정사각형은 늘 90도
+    const chair = itemDef("chair_wood")!;
+    const c: Placed = { id: "c", key: "chair_wood", x: 3, y: 3, turn: 3, wall: null };
+    expect(nextTurn([c], chair, c, 1)).toEqual({ turn: 0, half: false });
   });
 
   it("벽 장식은 같은 벽에서 겹치지 않는다", () => {
@@ -183,19 +205,21 @@ describe("배치", () => {
   });
 
   it("위에 선 물건들에 반 넘게 덮인 러그도 가려진 것으로 친다(누를 곳이 없어 표시로 고른다)", () => {
-    const rug: Placed = { id: "rug", key: "rug_round", x: 3, y: 3, flip: false, wall: null };
+    const rug: Placed = { id: "rug", key: "rug_round", x: 3, y: 3, turn: 0, wall: null };
     expect(hiddenItems([rug]).has("rug")).toBe(false);
-    const covered = [rug, { id: "t", key: "tank_small", x: 3, y: 4, flip: false, wall: null }, { id: "p", key: "plant_sunflower", x: 4, y: 3, flip: false, wall: null }] as Placed[];
+    const covered = [rug, { id: "t", key: "tank_small", x: 3, y: 4, turn: 0, wall: null }, { id: "p", key: "plant_sunflower", x: 4, y: 3, turn: 0, wall: null }] as Placed[];
     expect(hiddenItems(covered).has("rug")).toBe(true);
     // 앞쪽 한 칸만 덮이면 손가락이 닿는다
-    const front = [rug, { id: "c", key: "cushion", x: 4, y: 4, flip: false, wall: null }] as Placed[];
+    const front = [rug, { id: "c", key: "cushion", x: 4, y: 4, turn: 0, wall: null }] as Placed[];
     expect(hiddenItems(front).has("rug")).toBe(false);
   });
 
   it("빈 자리를 찾는다", () => {
     const spot = findSpot(starterRoom(), itemDef("desk")!);
     expect(spot).not.toBeNull();
-    expect(fitsFloor(starterRoom(), itemDef("desk")!, spot!.x, spot!.y, spot!.flip)).toBe(true);
+    expect(fitsFloor(starterRoom(), itemDef("desk")!, spot!.x, spot!.y, spot!.turn)).toBe(true);
+    // 새 물건은 앞모습이 보이는 쪽으로
+    expect([0, 1]).toContain(spot!.turn);
   });
 });
 

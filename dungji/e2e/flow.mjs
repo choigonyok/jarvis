@@ -165,6 +165,24 @@ await a.keyboard.press("ArrowLeft");
 await a.waitForTimeout(600);
 state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
 check("키보드 화살표로 한 칸", state.items.find((i) => i.id === table.id).x === target.x, state.items.find((i) => i.id === table.id));
+// 돌리기: ↺ 는 시계 반대로 90도씩, ↻ 는 반대로. 네 방향을 다 돈다(2·3 은 뒷모습).
+const turns = [];
+for (let k = 0; k < 4; k++) {
+  await a.getByRole("button", { name: "시계 반대 방향으로 돌리기" }).click();
+  await a.waitForTimeout(500);
+  state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+  turns.push(state.items.find((i) => i.id === table.id).turn);
+}
+check("돌리기 버튼으로 네 방향을 돈다", turns.join(",") === "1,2,3,0", turns);
+await a.getByRole("button", { name: "시계 방향으로 돌리기" }).click();
+await a.waitForTimeout(500);
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+check("반대로 돌리기", state.items.find((i) => i.id === table.id).turn === 3, state.items.find((i) => i.id === table.id));
+await a.locator(`[data-item="${table.id}"]`).focus();
+await a.keyboard.press("r");
+await a.waitForTimeout(500);
+state = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
+check("키보드 R 로 돌리기", state.items.find((i) => i.id === table.id).turn === 0, state.items.find((i) => i.id === table.id));
 
 // ── 창고에 넣었다가 꺼내면 다시 고른 채 꾸미기 ──
 await a.getByRole("button", { name: "창고에 넣기" }).click();
@@ -182,7 +200,7 @@ const taken = (items, ignore) => {
   const size = { bed_wood: [2, 3], table_low: [1, 1], lamp_floor: [1, 1], plant_tulip: [1, 1] };
   for (const i of items) {
     if (i.place !== "room" || i.wall || i.id === ignore || !size[i.key]) continue;
-    const [w, d] = i.flip ? [...size[i.key]].reverse() : size[i.key];
+    const [w, d] = i.turn % 2 ? [...size[i.key]].reverse() : size[i.key];
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < d; dy++) set.add(`${i.x + dx},${i.y + dy}`);
   }
   return set;

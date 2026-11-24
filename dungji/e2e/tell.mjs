@@ -254,7 +254,7 @@ check("화면을 보고 있으면 jarvis 로는 보내지 않는다", t.length =
 await page.close();
 await sleep(500);
 if (plant) {
-  await owner.post(`/items/${plant.id}/move`, { x: plant.x, y: plant.y, flip: !plant.flip });
+  await owner.post(`/items/${plant.id}/move`, { x: plant.x, y: plant.y, turn: (plant.turn + 1) % 4 });
   t = await told();
   check("화면을 닫은 상대에게는 jarvis 로", t.length === 1 && t[0].title === "하늘이 방을 꾸몄어요", t);
 }

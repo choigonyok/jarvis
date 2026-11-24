@@ -13,12 +13,12 @@ function sampleHome(): HomeView {
     place: "room" as const,
     x: s.x,
     y: s.y,
-    flip: Boolean(s.flip),
+    turn: s.turn ?? 0,
     wall: s.wall ?? null,
     plant: s.key.startsWith("plant_") ? { water: 80, stage: 4, maxStage: 4, ready: false, wilted: false, nextHours: null, thirsty: false } : undefined,
   }));
-  items.push({ id: "s-sofa", key: "sofa_two", place: "room", x: 3, y: 0, flip: false, wall: null, plant: undefined });
-  items.push({ id: "s-shelf", key: "shelf_book", place: "room", x: 2, y: 0, flip: false, wall: null, plant: undefined });
+  items.push({ id: "s-sofa", key: "sofa_two", place: "room", x: 3, y: 0, turn: 0, wall: null, plant: undefined });
+  items.push({ id: "s-shelf", key: "shelf_book", place: "room", x: 2, y: 0, turn: 0, wall: null, plant: undefined });
   return {
     id: "sample",
     slug: "sample",

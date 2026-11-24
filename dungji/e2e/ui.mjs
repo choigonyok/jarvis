@@ -50,10 +50,10 @@ home = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
 for (const i of home.items.filter((x) => x.place === "storage")) await call(yun.cookie, "POST", `/items/${i.id}/place`);
 home = (await call(yun.cookie, "GET", `/homes/${slug}`)).json.home;
 const id = (key) => home.items.find((i) => i.key === key)?.id;
-await call(yun.cookie, "POST", `/items/${id("sofa_two")}/move`, { x: 3, y: 0, flip: false });
-await call(yun.cookie, "POST", `/items/${id("shelf_book")}/move`, { x: 2, y: 0, flip: false });
-await call(yun.cookie, "POST", `/items/${id("tank_small")}/move`, { x: 6, y: 2, flip: false });
-await call(yun.cookie, "POST", `/items/${id("plant_sunflower")}/move`, { x: 6, y: 0, flip: false });
+await call(yun.cookie, "POST", `/items/${id("sofa_two")}/move`, { x: 3, y: 0, turn: 0 });
+await call(yun.cookie, "POST", `/items/${id("shelf_book")}/move`, { x: 2, y: 0, turn: 0 });
+await call(yun.cookie, "POST", `/items/${id("tank_small")}/move`, { x: 6, y: 2, turn: 0 });
+await call(yun.cookie, "POST", `/items/${id("plant_sunflower")}/move`, { x: 6, y: 0, turn: 0 });
 for (const species of ["fish_gold", "fish_neon", "fish_betta"]) await call(yun.cookie, "POST", "/shop/fish", { species, tankId: id("tank_small") });
 for (const key of ["desk", "cat_tower"]) await call(yun.cookie, "POST", "/shop/item", { key }); // 창고에 둔다
 // 해바라기는 다 폈고, 튤립은 목마르게
@@ -129,6 +129,25 @@ await shoot(chrome, yun, VIEWS[0], `/h/${slug}`, "phone-edit", {
     await p.getByRole("button", { name: "꾸미기" }).click();
     await p.locator(".room-editable").first().dispatchEvent("pointerdown");
     await p.waitForTimeout(300);
+  },
+});
+// 가장 작은 폰(SE): 옮기기 화살표와 돌리기가 한 줄에 드는지, 상점의 열 칸 줄
+const SE = { name: "se", width: 375, height: 667, mobile: true };
+await shoot(chrome, yun, SE, `/h/${slug}`, "se-edit", {
+  before: async (p) => {
+    await p.getByRole("button", { name: "꾸미기" }).click();
+    // 바닥 물건(소파)을 골라야 돌리기가 나온다(벽 장식은 '다른 벽으로')
+    await p.locator(`[data-item="${id("sofa_two")}"]`).focus();
+    await p.keyboard.press("Enter");
+    await p.getByRole("button", { name: "시계 반대 방향으로 돌리기" }).click();
+    await p.waitForTimeout(500);
+  },
+});
+await shoot(chrome, yun, SE, `/h/${slug}`, "se-shop-fish", {
+  before: async (p) => {
+    await p.getByRole("button", { name: "상점" }).click();
+    await p.getByRole("tab", { name: "물고기" }).click();
+    await p.waitForTimeout(400);
   },
 });
 await chrome.close();

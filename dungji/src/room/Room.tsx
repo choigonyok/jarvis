@@ -5,15 +5,17 @@
 import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { GRID, itemDef } from "../../shared/catalog";
 import type { HomeView, ItemView } from "../../shared/api";
-import { fitsFloor, fitsWall, footprint, hiddenItems, occluded, type Placed } from "../../shared/rules";
+import { fitsFloor, fitsWall, footprint, hiddenItems, nextTurn, occluded, type Placed } from "../../shared/rules";
 import { drawDirt, drawItem, drawWall, type DrawCtx } from "./art";
-import { Flat, FlipProvider, FLOOR_FRAME, LEFT_WALL_FRAME, proj, pts, RIGHT_WALL_FRAME, shade, unproj, WALL_H } from "./iso";
+import { Flat, FLOOR_FRAME, LEFT_WALL_FRAME, proj, pts, RIGHT_WALL_FRAME, shade, unproj, WALL_H } from "./iso";
+import { asTurn } from "./model";
 import type { Phase } from "../lib/time";
 
 export interface MoveTo {
   x: number;
   y: number;
-  flip: boolean;
+  /** 돌린 정도(0~3, src/room/model.tsx) */
+  turn: number;
   wall: "left" | "right" | null;
 }
 
@@ -95,7 +97,7 @@ interface FloorEntry {
   y: number;
   w: number;
   d: number;
-  flip: boolean;
+  turn: number;
 }
 
 /** 뒤에 있는 것부터 그리는 순서(서로 가리는 순서). */
@@ -131,11 +133,11 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
 
   const room = useMemo(() => home.items.filter((i) => i.place === "room"), [home.items]);
   const placedList: Placed[] = useMemo(
-    () => room.map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: i.flip, wall: i.wall })),
+    () => room.map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, turn: i.turn, wall: i.wall })),
     [room],
   );
 
-  const position = (i: ItemView): MoveTo => (drag && drag.id === i.id ? drag.to : { x: i.x, y: i.y, flip: i.flip, wall: i.wall });
+  const position = (i: ItemView): MoveTo => (drag && drag.id === i.id ? drag.to : { x: i.x, y: i.y, turn: i.turn, wall: i.wall });
 
   const floorItems: FloorEntry[] = [];
   const unders: FloorEntry[] = [];
@@ -148,8 +150,8 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
       continue;
     }
     const p = position(i);
-    const fp = footprint(def, p.flip);
-    const entry = { item: i, x: p.x, y: p.y, w: fp.w, d: fp.d, flip: p.flip };
+    const fp = footprint(def, p.turn);
+    const entry = { item: i, x: p.x, y: p.y, w: fp.w, d: fp.d, turn: p.turn };
     (def.under ? unders : floorItems).push(entry);
   }
 
@@ -184,15 +186,15 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
         const [u, w] = walls[wall];
         if (u < -0.5 || u > GRID + 0.5 || w < -0.3 || w > WALL_H + 0.3) return null;
         const pos = clamp(Math.round(u - grab[0]), 0, GRID - def.w);
-        return { to: { x: pos, y: 0, flip: false, wall }, valid: fitsWall(placedList, def, wall, pos, item.id) };
+        return { to: { x: pos, y: 0, turn: 0, wall }, valid: fitsWall(placedList, def, wall, pos, item.id) };
       };
       return sx >= 0 ? (pick("right") ?? pick("left")) : (pick("left") ?? pick("right"));
     }
     const [gx, gy] = unproj(sx, sy);
-    const fp = footprint(def, item.flip);
+    const fp = footprint(def, item.turn);
     const x = clamp(Math.round(gx - grab[0]), 0, GRID - fp.w);
     const y = clamp(Math.round(gy - grab[1]), 0, GRID - fp.d);
-    return { to: { x, y, flip: item.flip, wall: null }, valid: fitsFloor(placedList, def, x, y, item.flip, item.id) };
+    return { to: { x, y, turn: item.turn, wall: null }, valid: fitsFloor(placedList, def, x, y, item.turn, item.id) };
   }
 
   /** 손가락(또는 마우스)을 누른다. 꾸미기 중이면 바로 잡고, 아니면 길게 누르기를 기다린다. */
@@ -343,10 +345,8 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
         onClick={ghost || editing ? undefined : () => onItem?.(e.item)}
         {...(ghost ? {} : itemA11y(e.item))}
       >
-        <g transform={e.flip ? "scale(-1 1)" : undefined}>
-          {!ghost && <HitBox itemKey={e.item.key} />}
-          <FlipProvider flip={e.flip}>{drawItem(e.item.key, ctx)}</FlipProvider>
-        </g>
+        {!ghost && <HitBox itemKey={e.item.key} />}
+        {drawItem(e.item.key, ctx, asTurn(e.turn))}
       </g>
     );
   };
@@ -371,21 +371,27 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
     };
   };
 
-  /** 꾸미기 중 고른 물건을 화살표로 한 칸씩 옮긴다. */
+  /** 꾸미기 중 고른 물건을 화살표로 한 칸씩 옮기고, R 로 돌린다(Shift+R 은 반대로). */
   function onKey(ev: React.KeyboardEvent) {
     if (!editing || !selected) return;
     const item = room.find((i) => i.id === selected);
     const def = item && itemDef(item.key);
     if (!item || !def) return;
+    if ((ev.key === "r" || ev.key === "R") && def.kind !== "wall" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      ev.preventDefault();
+      const p = placedList.find((x) => x.id === item.id)!;
+      onMove?.(item, { x: item.x, y: item.y, turn: nextTurn(placedList, def, p, ev.shiftKey ? -1 : 1).turn, wall: null });
+      return;
+    }
     const step: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     const d = step[ev.key];
     if (!d) return;
     ev.preventDefault();
     if (def.kind === "wall") {
       const pos = item.x + (d[0] || d[1]) * (item.wall === "left" ? -1 : 1);
-      if (fitsWall(placedList, def, item.wall ?? "right", pos, item.id)) onMove?.(item, { x: pos, y: 0, flip: false, wall: item.wall });
-    } else if (fitsFloor(placedList, def, item.x + d[0], item.y + d[1], item.flip, item.id))
-      onMove?.(item, { x: item.x + d[0], y: item.y + d[1], flip: item.flip, wall: null });
+      if (fitsWall(placedList, def, item.wall ?? "right", pos, item.id)) onMove?.(item, { x: pos, y: 0, turn: 0, wall: item.wall });
+    } else if (fitsFloor(placedList, def, item.x + d[0], item.y + d[1], item.turn, item.id))
+      onMove?.(item, { x: item.x + d[0], y: item.y + d[1], turn: item.turn, wall: null });
   }
 
   const needs = (e: FloorEntry): ReactNode => {
@@ -637,12 +643,21 @@ export function Room({ home, phase, now, editing, selected, onSelect, onMove, on
             points={pts([[0, GRID, 0], [0, GRID, WALL_H], [0, 0, WALL_H], [GRID, 0, WALL_H], [GRID, 0, 0], [GRID, GRID, 0]])}
             fill="rgba(14,18,46,0.34)"
           />
-          {room
-            .filter((i) => i.key === "lamp_floor")
-            .map((i) => {
-              const [gx, gy] = proj(i.x + 0.5, i.y + 0.5, 1.5);
-              return <circle key={`glow-${i.id}`} cx={gx} cy={gy} r={92} fill={`url(#glow-${uid})`} style={{ mixBlendMode: "screen" }} />;
-            })}
+          {room.map((i) => {
+            const def = itemDef(i.key);
+            if (!def?.glow) return null;
+            // 불빛이 나는 자리: 벽 장식은 벽의 눈높이, 바닥 물건은 돌린 넓이의 가운데 위쪽. 큰 등일수록 넓게.
+            let at: [number, number];
+            if (def.kind === "wall") {
+              const u = i.x + def.w / 2;
+              at = i.wall === "left" ? proj(0, GRID - u, WALL_H - 1.2) : proj(u, 0, WALL_H - 1.2);
+            } else {
+              const { w, d } = footprint(def, i.turn);
+              at = proj(i.x + w / 2, i.y + d / 2, def.h * 0.8);
+            }
+            const r = def.kind === "wall" ? 64 : 40 + 30 * Math.min(def.h, 1.8);
+            return <circle key={`glow-${i.id}`} cx={at[0]} cy={at[1]} r={r} fill={`url(#glow-${uid})`} style={{ mixBlendMode: "screen" }} />;
+          })}
         </g>
       )}
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { FISH, ITEMS, itemDef, plantDef, THEMES, type ItemDef } from "../../shared/catalog";
+import { useEffect, useRef, useState } from "react";
+import { FISH, ITEMS, itemDef, plantDef, THEMES, type ItemDef, type ItemGroup } from "../../shared/catalog";
 import type { HomeResponse, HomeView, LedgerRow, Me } from "../../shared/api";
 import { expandPrice, sellPrice, STORAGE_MAX } from "../../shared/rules";
 import { ApiError, get, patch, post } from "../lib/api";
@@ -12,15 +12,26 @@ import { useConfirm } from "../ui/confirm";
 import { Sheet } from "../ui/sheet";
 import { stageName, type HomeActions } from "./Home";
 
-export type ShopTab = "floor" | "plant" | "tank" | "fish" | "wall" | "theme";
+export type ShopTab = ItemGroup | "rug" | "plant" | "tank" | "fish" | "wall" | "theme";
 const SHOP_TABS: [ShopTab, string][] = [
-  ["floor", "가구"],
+  ["furniture", "가구"],
+  ["kitchen", "주방·가전"],
+  ["light", "조명"],
+  ["hobby", "장식·취미"],
+  ["rug", "러그"],
   ["plant", "화분"],
   ["tank", "어항"],
   ["fish", "물고기"],
   ["wall", "벽 장식"],
   ["theme", "벽지·바닥"],
 ];
+
+/** 그 칸에 나오는 물건: 바닥 물건은 상점 칸(group, 없으면 가구), 러그·화분·어항·벽 장식은 종류로 */
+function onShelf(d: ItemDef, tab: ShopTab) {
+  if (tab === "rug") return d.kind === "floor" && Boolean(d.under);
+  if (tab === "plant" || tab === "tank" || tab === "wall") return d.kind === tab;
+  return d.kind === "floor" && !d.under && (d.group ?? "furniture") === tab;
+}
 
 function Price({ n, coins }: { n: number; coins: number }) {
   return <Feathers n={n} className={`text-ui font-semibold ${coins < n ? "text-dim" : ""}`} />;
@@ -29,14 +40,19 @@ function Price({ n, coins }: { n: number; coins: number }) {
 // ── 상점 ─────────────────────────────────────────────────────────
 
 export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home: HomeView; actions: HomeActions; initialTab?: ShopTab; tankId?: string; onClose: () => void }) {
-  const [tab, setTab] = useState<ShopTab>(initialTab ?? "floor");
+  const [tab, setTab] = useState<ShopTab>(initialTab ?? "furniture");
+  const tabsRef = useRef<HTMLDivElement>(null);
+  // 칸이 열 개라 줄이 옆으로 넘어간다: 고른 칸(처음 열 때의 물고기 칸 같은)이 늘 보이게
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [tab]);
   const coins = home.coins ?? 0;
   const tanks = home.items.filter((i) => i.place === "room" && i.tank);
   const [tank, setTank] = useState<string | undefined>(tankId ?? tanks[0]?.id);
   const stored = home.items.filter((i) => i.place === "storage").length;
   const full = stored >= (home.storageSlots ?? 4);
 
-  const list: ItemDef[] = ITEMS.filter((i) => (tab === "floor" ? i.kind === "floor" : i.kind === tab));
+  const list: ItemDef[] = ITEMS.filter((i) => onShelf(i, tab));
 
   return (
     <Sheet
@@ -48,7 +64,7 @@ export function ShopSheet({ home, actions, initialTab, tankId, onClose }: { home
         </span>
       }
     >
-      <div className="scroll-row -mx-5 mb-3 flex gap-1.5 overflow-x-auto px-5 pb-1" role="tablist" aria-label="상점 칸">
+      <div ref={tabsRef} className="scroll-row -mx-5 mb-3 flex gap-1.5 overflow-x-auto px-5 pb-1" role="tablist" aria-label="상점 칸">
         {SHOP_TABS.map(([t, name]) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`focus-ring h-11 shrink-0 rounded-full border px-4 text-ui ${tab === t ? "border-edge bg-glass-raised font-medium text-foreground" : "border-transparent text-dim hover:text-foreground"}`}>
             {name}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { itemDef, plantDef } from "../../shared/catalog";
 import type { HomeResponse, HomeView, ItemView, Me, Reward } from "../../shared/api";
 import { liveLine, UNNAMED } from "../../shared/news";
-import { fitsFloor, fitsWall, type Placed } from "../../shared/rules";
+import { fitsFloor, fitsWall, nextTurn, type Placed } from "../../shared/rules";
 import { api, ApiError, get } from "../lib/api";
 import { useCall } from "../lib/call";
 import { EMBEDDED, tellParent } from "../lib/embed";
@@ -40,7 +40,7 @@ export interface HomeActions {
 
 /** 방에 놓인 물건들(자리 검사용) */
 function placedIn(home: HomeView): Placed[] {
-  return home.items.filter((i) => i.place === "room").map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: i.flip, wall: i.wall }));
+  return home.items.filter((i) => i.place === "room").map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, turn: i.turn, wall: i.wall }));
 }
 
 /** 이 기기에서 그 칸(방명록·일기)을 마지막으로 본 때 */
@@ -211,7 +211,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
   /** 물건을 옮긴다: 화면은 바로 바뀌고(놓자마자 제자리로 튀지 않게), 서버에는 놓은 차례대로 간다. */
   const move = useCallback(
     (item: ItemView, to: MoveTo) => {
-      setHome((h) => h && { ...h, items: h.items.map((i) => (i.id === item.id ? { ...i, x: to.x, y: to.y, flip: to.flip, wall: to.wall } : i)) });
+      setHome((h) => h && { ...h, items: h.items.map((i) => (i.id === item.id ? { ...i, x: to.x, y: to.y, turn: to.turn, wall: to.wall } : i)) });
       const seq = ++moveSeq.current;
       moving.current++;
       moves.current = moves.current.then(async () => {
@@ -309,22 +309,26 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     if (def.kind === "wall") {
       const pos = selectedItem.x + dx;
       if (!fitsWall(room, def, selectedItem.wall ?? "right", pos, selectedItem.id)) return toast.show("그쪽은 막혀 있어요");
-      move(selectedItem, { x: pos, y: 0, flip: false, wall: selectedItem.wall });
+      move(selectedItem, { x: pos, y: 0, turn: 0, wall: selectedItem.wall });
       return;
     }
     const x = selectedItem.x + dx;
     const y = selectedItem.y + dy;
-    if (!fitsFloor(room, def, x, y, selectedItem.flip, selectedItem.id)) return toast.show("그쪽은 막혀 있어요");
-    move(selectedItem, { x, y, flip: selectedItem.flip, wall: null });
+    if (!fitsFloor(room, def, x, y, selectedItem.turn, selectedItem.id)) return toast.show("그쪽은 막혀 있어요");
+    move(selectedItem, { x, y, turn: selectedItem.turn, wall: null });
   }
 
-  /** 꾸미기의 돌리기: 그 자리에서 앞뒤를 바꾼다(넓이가 바뀌어 다른 물건과 겹치면 못 돌린다). */
-  function flip() {
+  /**
+   * 꾸미기의 돌리기: 그 자리에서 90도(dir 1 은 ↺, -1 은 ↻). 네 방향을 다 볼 수 있다(오른쪽 위·왼쪽 위는 뒷모습).
+   * 가로·세로가 바뀌어 다른 물건과 겹치면 반 바퀴를 돌린다.
+   */
+  function turn(dir: 1 | -1) {
     if (!home || !selectedItem) return;
     const def = itemDef(selectedItem.key)!;
-    if (!fitsFloor(placedIn(home), def, selectedItem.x, selectedItem.y, !selectedItem.flip, selectedItem.id))
-      return toast.show("돌리면 다른 물건과 겹쳐요. 조금 옮긴 뒤 돌려 주세요");
-    move(selectedItem, { x: selectedItem.x, y: selectedItem.y, flip: !selectedItem.flip, wall: null });
+    const room = placedIn(home);
+    const next = nextTurn(room, def, room.find((p) => p.id === selectedItem.id)!, dir);
+    if (next.half) toast.show("옆으로 돌릴 자리가 없어 반 바퀴 돌렸어요");
+    move(selectedItem, { x: selectedItem.x, y: selectedItem.y, turn: next.turn, wall: null });
   }
 
   function switchWall() {
@@ -333,7 +337,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
     const wall = selectedItem.wall === "left" ? "right" : "left";
     const room = placedIn(home);
     for (let pos = 0; pos + def.w <= 7; pos++)
-      if (fitsWall(room, def, wall, pos, selectedItem.id)) return move(selectedItem, { x: pos, y: 0, flip: false, wall });
+      if (fitsWall(room, def, wall, pos, selectedItem.id)) return move(selectedItem, { x: pos, y: 0, turn: 0, wall });
     toast.show("저쪽 벽에는 자리가 없어요");
   }
 
@@ -442,7 +446,7 @@ export function HomePage({ slug, me, onMe }: { slug: string; me: Me; onMe: (m: M
                 item={selectedItem}
                 onNudge={nudge}
                 onSwitchWall={switchWall}
-                onFlip={flip}
+                onTurn={turn}
                 onStore={async () => {
                   if (!selectedItem) return;
                   const r = await act(`/items/${selectedItem.id}/store`);
@@ -617,14 +621,14 @@ function EditBar({
   item,
   onNudge,
   onSwitchWall,
-  onFlip,
+  onTurn,
   onStore,
   onDone,
 }: {
   item?: ItemView;
   onNudge: (dx: number, dy: number) => void;
   onSwitchWall: () => void;
-  onFlip: () => void;
+  onTurn: (dir: 1 | -1) => void;
   onStore: () => void;
   onDone: () => void;
 }) {
@@ -648,7 +652,7 @@ function EditBar({
       <p className="px-1 text-ui text-dim">
         {def ? (
           <>
-            <b className="font-medium text-ink">{josa(def.name, "을", "를")}</b> 끌거나 화살표로 옮겨요.
+            <b className="font-medium text-ink">{josa(def.name, "을", "를")}</b> 끌거나 화살표로 옮겨요.{wall ? "" : " 돌리면 뒷모습도 보여요."}
           </>
         ) : (
           "물건을 끌어서 옮기거나, 눌러 고른 뒤 화살표로 옮겨요."
@@ -668,10 +672,14 @@ function EditBar({
               다른 벽으로
             </button>
           ) : (
-            <button type="button" className="btn btn-raised h-11 flex-1 px-3 text-ui" onClick={onFlip}>
-              <Icon name="flip" className="size-[18px]" />
-              돌리기
-            </button>
+            <div className="ml-auto flex gap-1.5" role="group" aria-label="돌리기">
+              <button type="button" className="btn btn-raised size-11 min-h-0 px-0" onClick={() => onTurn(1)} aria-label="시계 반대 방향으로 돌리기">
+                <Icon name="turnLeft" className="size-[18px]" />
+              </button>
+              <button type="button" className="btn btn-raised size-11 min-h-0 px-0" onClick={() => onTurn(-1)} aria-label="시계 방향으로 돌리기">
+                <Icon name="turnRight" className="size-[18px]" />
+              </button>
+            </div>
           )}
         </div>
       )}

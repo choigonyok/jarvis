@@ -1,7 +1,6 @@
 // 비스듬히 내려다본 방(아이소메트릭)의 좌표와 기본 도형.
 // 바닥 칸 (gx, gy) 와 높이 z 를 화면 좌표로 옮긴다. gx 는 오른쪽 아래, gy 는 왼쪽 아래로 늘어난다.
 
-import { createContext, useContext, type ReactNode } from "react";
 import { GRID } from "../../shared/catalog";
 
 import { proj, TH, TW, UH } from "../../shared/iso";
@@ -57,14 +56,7 @@ export function mixHex(a: string, b: string, t: number) {
   return `rgb(${m(0)},${m(1)},${m(2)})`;
 }
 
-// ── 그리는 중인 물건이 뒤집혔나(빛 방향을 맞추려고) ──
-
-const FlipCtx = createContext(false);
-export const FlipProvider = ({ flip, children }: { flip: boolean; children: ReactNode }) => (
-  <FlipCtx.Provider value={flip}>{children}</FlipCtx.Provider>
-);
-
-/** 상자 하나: 윗면은 밝게, 왼쪽 아래 면은 그대로, 오른쪽 아래 면은 어둡게. */
+/** 상자 하나: 윗면은 밝게, 왼쪽 아래 면은 그대로, 오른쪽 아래 면은 어둡게(빛은 늘 왼쪽 위에서). */
 export function Box({
   x = 0,
   y = 0,
@@ -86,10 +78,8 @@ export function Box({
   top?: string;
   edge?: boolean;
 }) {
-  const flip = useContext(FlipCtx);
-  // 뒤집으면 화면에서 좌우가 바뀌므로, 빛이 늘 왼쪽 위에서 오게 두 면의 밝기를 바꾼다.
-  const left = shade(c, flip ? -0.16 : 0);
-  const right = shade(c, flip ? 0 : -0.16);
+  const left = shade(c, 0);
+  const right = shade(c, -0.16);
   const stroke = edge ? shade(c, -0.32) : "none";
   return (
     <g strokeWidth={0.6} stroke={stroke} strokeLinejoin="round">

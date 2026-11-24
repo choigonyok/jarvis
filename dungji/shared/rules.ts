@@ -272,13 +272,14 @@ export interface Placed {
   key: string;
   x: number;
   y: number;
-  flip: boolean;
+  /** 돌린 정도: 위에서 보아 시계 반대 방향으로 90도씩(0~3, src/room/model.tsx) */
+  turn: number;
   wall: "left" | "right" | null;
 }
 
-/** 뒤집으면 x·y 가 바뀐다(화면에서 좌우 대칭). */
-export function footprint(def: ItemDef, flip: boolean) {
-  return flip ? { w: def.d, d: def.w } : { w: def.w, d: def.d };
+/** 돌린 물건이 차지하는 넓이: 90도·270도 돌리면 가로와 세로가 바뀐다. */
+export function footprint(def: ItemDef, turn: number) {
+  return turn % 2 ? { w: def.d, d: def.w } : { w: def.w, d: def.d };
 }
 
 function coveredTiles(room: Placed[], opts: { under?: boolean } = {}) {
@@ -287,20 +288,30 @@ function coveredTiles(room: Placed[], opts: { under?: boolean } = {}) {
     const def = itemDef(p.key);
     if (!def || def.kind === "wall") continue;
     if (Boolean(def.under) !== Boolean(opts.under)) continue;
-    const { w, d } = footprint(def, p.flip);
+    const { w, d } = footprint(def, p.turn);
     for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) set.add(`${p.x + i},${p.y + j}`);
   }
   return set;
 }
 
 /** 바닥 물건을 (x, y) 에 놓을 수 있나. 러그는 러그끼리만, 가구는 가구끼리만 겹치면 안 된다. */
-export function fitsFloor(room: Placed[], def: ItemDef, x: number, y: number, flip: boolean, ignoreId?: string) {
-  const { w, d } = footprint(def, flip);
+export function fitsFloor(room: Placed[], def: ItemDef, x: number, y: number, turn: number, ignoreId?: string) {
+  const { w, d } = footprint(def, turn);
   if (x < 0 || y < 0 || x + w > GRID || y + d > GRID) return false;
   const others = room.filter((p) => p.id !== ignoreId);
   const covered = coveredTiles(others, { under: def.under });
   for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) if (covered.has(`${x + i},${y + j}`)) return false;
   return true;
+}
+
+/**
+ * 꾸미기의 돌리기: dir 쪽(1 이면 위에서 보아 시계 반대, -1 이면 시계 방향)으로 90도. 그 자리에서 가로·세로가 바뀌어
+ * 다른 물건과 겹치면 반 바퀴를 돌린다(넓이가 같아 늘 들어간다). 돌린 뒤의 정도와, 반 바퀴로 대신했는지.
+ */
+export function nextTurn(room: Placed[], def: ItemDef, p: Placed, dir: 1 | -1): { turn: number; half: boolean } {
+  const quarter = (((p.turn + dir) % 4) + 4) % 4;
+  if (fitsFloor(room, def, p.x, p.y, quarter, p.id)) return { turn: quarter, half: false };
+  return { turn: (p.turn + 2) % 4, half: true };
 }
 
 /** 벽 물건을 그 벽의 pos 에 놓을 수 있나. */
@@ -318,7 +329,7 @@ export function fitsWall(room: Placed[], def: ItemDef, wall: "left" | "right", p
 /** 바닥 물건의 그림 윤곽(상자의 육각형) */
 function silhouette(p: Placed) {
   const def = itemDef(p.key)!;
-  const { w, d } = footprint(def, p.flip);
+  const { w, d } = footprint(def, p.turn);
   const h = Math.max(def.h, 0.05);
   return {
     box: { x: p.x, y: p.y, w, d },
@@ -371,7 +382,7 @@ export const hides = (front: Placed, back: Placed) => coveredShare(front, back) 
 export function rugCovered(rug: Placed, room: Placed[]) {
   const def = itemDef(rug.key);
   if (!def?.under) return 0;
-  const { w, d } = footprint(def, rug.flip);
+  const { w, d } = footprint(def, rug.turn);
   const flat = [proj(rug.x, rug.y, 0), proj(rug.x + w, rug.y, 0), proj(rug.x + w, rug.y + d, 0), proj(rug.x, rug.y + d, 0)] as [number, number][];
   const fronts = room.filter(standing).map((p) => silhouette(p).poly);
   const xs = flat.map((p) => p[0]);
@@ -407,30 +418,31 @@ export function findSpot(room: Placed[], def: ItemDef): Omit<Placed, "id" | "key
   if (def.kind === "wall") {
     for (const wall of ["right", "left"] as const)
       for (let pos = 0; pos + def.w <= GRID; pos++)
-        if (fitsWall(room, def, wall, pos)) return { x: pos, y: 0, flip: false, wall };
+        if (fitsWall(room, def, wall, pos)) return { x: pos, y: 0, turn: 0, wall };
     return null;
   }
   let best: Omit<Placed, "id" | "key"> | null = null;
   let bestScore = Infinity;
   for (let x = 0; x < GRID; x++)
     for (let y = 0; y < GRID; y++)
-      for (const flip of [false, true]) {
-        if (!fitsFloor(room, def, x, y, flip)) continue;
-        const { w, d } = footprint(def, flip);
+      // 새 물건은 앞모습이 보이게(0, 1) 놓는다.
+      for (const turn of [0, 1]) {
+        if (!fitsFloor(room, def, x, y, turn)) continue;
+        const { w, d } = footprint(def, turn);
         let score: number;
         if (def.under) score = Math.abs(x + w / 2 - GRID / 2) + Math.abs(y + d / 2 - GRID / 2);
         else {
           score = x + y;
           if (def.h >= 1.4 && x !== 0 && y !== 0) score += 20;
           // 조금이라도 가리거나 가려지는 자리는 그만큼 뒤로 미룬다(반쯤 가려지면 손가락이 앞의 가구를 누른다).
-          const me: Placed = { id: "_new", key: def.key, x, y, flip, wall: null };
+          const me: Placed = { id: "_new", key: def.key, x, y, turn, wall: null };
           // 돌봐야 하는 화분·어항을 가리는 것은 훨씬 더 미룬다(가려지면 물을 줄 수 없다).
           const care = (p: Placed) => (itemDef(p.key)?.kind === "plant" || itemDef(p.key)?.kind === "tank" ? 120 : 40);
           for (const p of room) score += care(p) * coveredShare(me, p) + care(me) * coveredShare(p, me);
         }
         if (score < bestScore) {
           bestScore = score;
-          best = { x, y, flip, wall: null };
+          best = { x, y, turn, wall: null };
         }
       }
   return best;
@@ -445,7 +457,7 @@ export function occluded(room: Placed[], x: number, y: number) {
   for (const p of room) {
     const def = itemDef(p.key);
     if (!def || def.kind === "wall" || def.under || def.h <= 0) continue;
-    const { w, d } = footprint(def, p.flip);
+    const { w, d } = footprint(def, p.turn);
     if (x >= p.x && x < p.x + w && y >= p.y && y < p.y + d) continue;
     const poly: [number, number][] = [
       proj(p.x, p.y, def.h),

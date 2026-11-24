@@ -309,7 +309,7 @@ function starterItems(db: D1Database, coupleId: string, t: number) {
         `INSERT INTO items (id, couple_id, key, place, x, y, flip, wall, state, created_at)
          VALUES (?, ?, ?, 'room', ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(newId(), coupleId, s.key, s.x, s.y, s.flip ? 1 : 0, s.wall ?? null, state ? JSON.stringify(state) : null, t + i);
+      .bind(newId(), coupleId, s.key, s.x, s.y, s.turn ?? 0, s.wall ?? null, state ? JSON.stringify(state) : null, t + i);
   });
 }
 
@@ -585,14 +585,25 @@ app.get("/ledger", async (c) => {
 
 // ── 방 꾸미기·창고 ───────────────────────────────────────────────
 
+/**
+ * 요청의 돌린 정도(0~3, 위에서 보아 시계 반대 방향으로 90도씩). 좌우 뒤집기만 알던 화면은 flip 을 보낸다(참이면 1).
+ * items.flip 칸에 그대로 둔다.
+ */
+function turnOf(b: { turn?: unknown; flip?: unknown }) {
+  if (b.turn === undefined) return b.flip ? 1 : 0;
+  const n = Number(b.turn);
+  if (!Number.isInteger(n) || n < 0 || n > 3) fail(400, "bad_input", "돌린 방향을 다시 골라 주세요.");
+  return n;
+}
+
 app.post("/items/:id/move", async (c) => {
   const { couple, state, item } = await myItem(c, c.req.param("id"));
   if (item.place !== "room") fail(409, "not_in_room", "창고에 든 물건은 먼저 방에 꺼내 주세요.");
   const def = itemDef(item.key)!;
-  const b = await body<{ x: number; y: number; flip: boolean; wall: "left" | "right" }>(c);
+  const b = await body<{ x: number; y: number; turn: number; flip: boolean; wall: "left" | "right" }>(c);
   const x = Number(b.x);
   const y = Number(b.y ?? 0);
-  const flip = Boolean(b.flip);
+  const turn = turnOf(b);
   if (!Number.isInteger(x) || !Number.isInteger(y)) fail(400, "bad_input", "놓을 자리를 다시 골라 주세요.");
   const room = placed(state.items);
   if (def.kind === "wall") {
@@ -600,8 +611,8 @@ app.post("/items/:id/move", async (c) => {
     if (!fitsWall(room, def, wall, x, item.id)) fail(409, "no_room", "그 자리에는 다른 장식이 있어요.");
     await c.env.DB.prepare("UPDATE items SET x = ?, y = 0, flip = 0, wall = ? WHERE id = ?").bind(x, wall, item.id).run();
   } else {
-    if (!fitsFloor(room, def, x, y, flip, item.id)) fail(409, "no_room", "그 자리에는 놓을 수 없어요.");
-    await c.env.DB.prepare("UPDATE items SET x = ?, y = ?, flip = ? WHERE id = ?").bind(x, y, flip ? 1 : 0, item.id).run();
+    if (!fitsFloor(room, def, x, y, turn, item.id)) fail(409, "no_room", "그 자리에는 놓을 수 없어요.");
+    await c.env.DB.prepare("UPDATE items SET x = ?, y = ?, flip = ? WHERE id = ?").bind(x, y, turn, item.id).run();
   }
   notify(c, couple.id, "home", [{ k: "decorate" }]);
   return respondHome(c, couple.id);
@@ -621,16 +632,16 @@ app.post("/items/:id/place", async (c) => {
   const { couple, state, item } = await myItem(c, c.req.param("id"));
   if (item.place === "room") return respondHome(c, couple.id);
   const def = itemDef(item.key)!;
-  const b = await body<{ x: number; y: number; flip: boolean; wall: "left" | "right" }>(c);
+  const b = await body<{ x: number; y: number; turn: number; flip: boolean; wall: "left" | "right" }>(c);
   const room = placed(state.items);
   let spot = findSpot(room, def);
   if (b.x !== undefined) {
     const x = Number(b.x);
     const y = Number(b.y ?? 0);
-    const flip = Boolean(b.flip);
+    const turn = turnOf(b);
     const wall = def.kind === "wall" ? (b.wall === "left" ? "left" : "right") : null;
-    const ok = wall ? fitsWall(room, def, wall, x) : fitsFloor(room, def, x, y, flip);
-    spot = ok ? { x, y, flip, wall } : null;
+    const ok = wall ? fitsWall(room, def, wall, x) : fitsFloor(room, def, x, y, turn);
+    spot = ok ? { x, y, turn: wall ? 0 : turn, wall } : null;
   }
   if (!spot) fail(409, "no_room", "방에 빈 자리가 없어요. 다른 물건을 창고에 넣어 주세요.");
   const t = now();
@@ -638,7 +649,7 @@ app.post("/items/:id/place", async (c) => {
     c.env.DB.prepare("UPDATE items SET place = 'room', x = ?, y = ?, flip = ?, wall = ?, stored_at = NULL WHERE id = ?").bind(
       spot.x,
       spot.y,
-      spot.flip ? 1 : 0,
+      spot.turn,
       spot.wall,
       item.id,
     ),
@@ -698,11 +709,11 @@ app.post("/shop/item", async (c) => {
   const t = now();
   const state = await tick(c.env.DB, couple, t);
   const stored = state.items.filter((i) => i.place === "storage").length;
-  let where: { place: "room" | "storage"; x: number; y: number; flip: boolean; wall: "left" | "right" | null };
+  let where: { place: "room" | "storage"; x: number; y: number; turn: number; wall: "left" | "right" | null };
   // 산 물건은 방의 빈자리(벽 쪽부터, 아무것도 가리지 않는 곳)에 바로 놓는다. 방이 차면 창고로.
   const spot = findSpot(placed(state.items), def);
   if (spot) where = { place: "room", ...spot };
-  else if (stored < couple.storage_slots) where = { place: "storage", x: 0, y: 0, flip: false, wall: null };
+  else if (stored < couple.storage_slots) where = { place: "storage", x: 0, y: 0, turn: 0, wall: null };
   else fail(409, "storage_full", "방도 창고도 꽉 찼어요. 창고를 넓히거나 물건을 팔아 주세요.");
   const newItemId = newId();
   const itemState =
@@ -719,7 +730,7 @@ app.post("/shop/item", async (c) => {
       where.place,
       where.x,
       where.y,
-      where.flip ? 1 : 0,
+      where.turn,
       where.wall,
       itemState ? JSON.stringify(itemState) : null,
       where.place === "storage" ? t : null,

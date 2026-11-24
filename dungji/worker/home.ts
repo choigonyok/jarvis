@@ -46,6 +46,7 @@ export interface ItemRow {
   place: "room" | "storage";
   x: number;
   y: number;
+  /** 돌린 정도(0~3). 칸 이름은 좌우 뒤집기만 있던 때의 것이라 flip 이고, 그때의 0·1 이 지금의 0·1 과 같은 방향이다. */
   flip: number;
   wall: "left" | "right" | null;
   state: string | null;
@@ -102,7 +103,7 @@ export async function loadState(db: D1Database, coupleId: string): Promise<HomeS
 export const placed = (items: ItemRow[]): Placed[] =>
   items
     .filter((i) => i.place === "room")
-    .map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, flip: Boolean(i.flip), wall: i.wall }));
+    .map((i) => ({ id: i.id, key: i.key, x: i.x, y: i.y, turn: i.flip, wall: i.wall }));
 
 export const parse = <T>(json: string | null): T => JSON.parse(json ?? "{}") as T;
 
@@ -184,7 +185,7 @@ function itemView(item: ItemRow, fish: FishRow[], now: number): ItemView {
     place: item.place,
     x: item.x,
     y: item.y,
-    flip: Boolean(item.flip),
+    turn: item.flip,
     wall: item.wall,
   };
   if (def?.kind === "plant") {

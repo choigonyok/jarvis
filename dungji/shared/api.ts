@@ -31,7 +31,8 @@ export interface ItemView {
   place: "room" | "storage";
   x: number;
   y: number;
-  flip: boolean;
+  /** 돌린 정도(0~3): 위에서 보아 시계 반대 방향으로 90도씩. 홀수면 가로·세로가 바뀐다. */
+  turn: number;
   wall: "left" | "right" | null;
   plant?: PlantView;
   tank?: { clarity: number; capacity: number; fish: FishItem[] };
